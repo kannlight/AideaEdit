@@ -16,7 +16,7 @@ class Memo(BaseModel):
 
 class StructureUpdateRequest(BaseModel):
     current_structure: str
-    memos: List[Memo]
+    new_memo: Memo
 
 class ProseGenerateRequest(BaseModel):
     structure: str
@@ -31,11 +31,13 @@ class ProseRefineRequest(BaseModel):
 # --- Prompts ---
 
 STRUCTURE_ADD_SYSTEM_PROMPT = """あなたは執筆アシスタントです。
-ユーザーの「メモ（思考の断片）」を受けて、Markdown形式の「構成案（箇条書き）」を更新・提案してください。
+ユーザーが入力した「メモ（思考の断片）」を、Markdown形式の「構成案（箇条書き）」に加えます。
 
 ## ルール:
 1. 現在の構成案をベースに、新しいメモの内容を論理的かつ自然に組み込んでください。
-2. 出力の最終形式はMarkdownの箇条書きのみとしてください。
+2. 与えられるメモは執筆する文章の一部分に過ぎません。
+3. 構成案を完成させる必要はありません。メモに書いていない内容を勝手に追加しないでください。
+4. 出力はMarkdownの箇条書きのみとしてください。
 """
 
 STRUCTURE_REMOVE_SYSTEM_PROMPT = """あなたは執筆アシスタントです。
@@ -43,8 +45,8 @@ STRUCTURE_REMOVE_SYSTEM_PROMPT = """あなたは執筆アシスタントです�
 
 ## ルール:
 1. 現在の構成案から、指定されたメモの内容に該当する部分を適切に削除・整理してください。
-2. 削除によって文脈が不自然になる場合は、周囲を微調整しても構いません。
-3. 出力の最終形式はMarkdownの箇条書きのみとしてください。
+2. 削除によって論理構成が不自然になる場合は、全体を更新しても構いません。
+3. 出力はMarkdownの箇条書きのみとしてください。
 """
 
 PROSE_GENERATE_SYSTEM_PROMPT = """あなたはプロのライターです。
@@ -70,11 +72,19 @@ PROSE_REFINE_SYSTEM_PROMPT = """あなたは推敲アシスタントです。
 
 @router.post("/structure/update")
 async def update_structure(request: StructureUpdateRequest, req: Request):
-    memo_str = "\n".join([f"- [{m.type}] {m.content}" for m in request.memos])
-    user_prompt = f"現在の構成案:\n{request.current_structure}\n\nメモ:\n{memo_str}\n\nこれらを踏まえた新しい構成案を作成してください。"
+    memo = request.new_memo
+    
+    if memo.type == 'remove':
+        system_prompt = STRUCTURE_REMOVE_SYSTEM_PROMPT
+        memo_display = f"削除対象のメモ: {memo.content}"
+    else:
+        system_prompt = STRUCTURE_ADD_SYSTEM_PROMPT
+        memo_display = f"追加するメモ: {memo.content}"
+
+    user_prompt = f"現在の構成案:\n{request.current_structure}\n\n{memo_display}\n\nこれらを踏まえた新しい構成案を作成してください。"
 
     async def event_generator():
-        async for chunk in llm_service.generate_stream(STRUCTURE_SYSTEM_PROMPT, user_prompt):
+        async for chunk in llm_service.generate_stream(system_prompt, user_prompt):
             if await req.is_disconnected():
                 break
             yield f"data: {json.dumps({'content': chunk})}\n\n"
