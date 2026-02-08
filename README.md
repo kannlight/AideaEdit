@@ -2,8 +2,6 @@
 
 AideaEditは、断片的な思考のメモを追加していくだけで、文章が構成されるAIライティング支援ツールです。
 
-![UI Preview](file:///home/kanno/.gemini/antigravity/brain/00361370-2ea8-4075-98e7-ddeadd62fe3d/light_mode_initial_1770556949419.png)
-
 ## コンセプト
 
 AideaEditは以下のステップで文章執筆作業をサポートします：
