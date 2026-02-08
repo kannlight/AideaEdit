@@ -7,7 +7,7 @@ import { fetchSSE } from '../utils/sse'
 import ScrollArea from './ui/ScrollArea'
 
 export default function StructurePane() {
-    const { structure, prevStructure, updateStructure, memos, updateMemoStatus } = useStore()
+    const { structure, prevStructure, updateStructure, memos, updateMemoStatus, startStructureGeneration, endStructureGeneration, updateStructureStream } = useStore()
     const [isEditing, setIsEditing] = useState(false)
     const [localStructure, setLocalStructure] = useState(structure)
     const [diffHtml, setDiffHtml] = useState('')
@@ -71,6 +71,7 @@ export default function StructurePane() {
             updateMemoStatus(pendingMemo.id, 'PENDING')
 
             let fullStructure = ''
+            startStructureGeneration(prevStructure)
             await fetchSSE('/api/structure/update', {
                 method: 'POST',
                 body: JSON.stringify({
@@ -79,9 +80,10 @@ export default function StructurePane() {
                 })
             }, (data) => {
                 fullStructure += data.content
-                updateStructure(fullStructure)
+                updateStructureStream(fullStructure)
             }, () => {
                 console.log('Reload done')
+                endStructureGeneration()
             })
         }
     }

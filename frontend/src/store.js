@@ -63,6 +63,19 @@ const useStore = create(
                 structure: newStructure
             })),
 
+            startStructureGeneration: (currentStructure) => set({
+                prevStructure: currentStructure,
+                isGeneratingStructure: true
+            }),
+
+            endStructureGeneration: () => set({
+                isGeneratingStructure: false
+            }),
+
+            updateStructureStream: (newStructure) => set({
+                structure: newStructure
+            }),
+
             updateMemoStatus: (id, status) => set((state) => ({
                 memos: state.memos.map(m => m.id === id ? { ...m, status } : m)
             })),
