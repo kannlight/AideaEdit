@@ -31,9 +31,9 @@ export default function StructurePane() {
             const html = diffs.map(([op, text]) => {
                 const safeText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
                 if (op === 1) { // Insert
-                    return `< span class="bg-green-100 text-green-800 px-1 rounded" > ${safeText}</span > `
+                    return `<span class="bg-green-500/20 text-green-700 dark:text-green-300 px-1 rounded mx-0.5">${safeText}</span>`
                 } else if (op === -1) { // Delete
-                    return `< span class="bg-red-50 text-red-400 px-1 rounded line-through decoration-red-400 opacity-60 text-xs" > ${safeText}</span > `
+                    return `<span class="bg-destructive/10 text-destructive px-1 rounded line-through opacity-60 text-xs mx-0.5">${safeText}</span>`
                 }
                 return safeText
             }).join('')
@@ -97,86 +97,91 @@ export default function StructurePane() {
     }
 
     return (
-        <div className="pane bg-white dark:bg-card flex flex-col h-full">
-            <div className="p-4 border-b border-border flex justify-between items-center bg-card sticky top-0 z-10 shrink-0">
-                <h2 className="font-semibold text-foreground">Structure Draft</h2>
+        <div className="pane bg-background flex flex-col h-full border-r border-border/50">
+            <div className="px-4 py-3 border-b border-border bg-background/95 backdrop-blur sticky top-0 z-10 shrink-0 flex justify-between items-center h-[57px]">
+                <h2 className="font-semibold text-foreground text-sm tracking-tight flex items-center gap-2">Structure Draft</h2>
 
                 {/* Action Buttons for Diff */}
                 {hasDiff && !isEditing && (
-                    <div className="flex gap-2">
+                    <div className="flex gap-1 items-center animate-in fade-in slide-in-from-right-4 duration-300">
                         <button
                             onClick={handleReload}
-                            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-md transition-colors"
+                            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
                             title="再生成 (Reload)"
                         >
-                            <RefreshCw size={18} />
+                            <RefreshCw size={16} />
                         </button>
                         <button
                             onClick={handleUndo}
                             className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
                             title="取り消し (Undo)"
                         >
-                            <Undo2 size={18} />
+                            <Undo2 size={16} />
                         </button>
+                        <div className="w-px h-4 bg-border mx-1"></div>
                         <button
                             onClick={handleConfirm}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:opacity-90 transition-opacity shadow-sm"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-md hover:opacity-90 transition-opacity shadow-sm"
                             title="確定 (Confirm)"
                         >
-                            <Check size={16} /> 確定
+                            <Check size={14} /> 確定
                         </button>
                     </div>
                 )}
 
                 {/* Editing Save/Cancel */}
                 {isEditing && (
-                    <div className="flex gap-2">
+                    <div className="flex gap-1 items-center animate-in fade-in slide-in-from-right-4 duration-200">
                         <button
                             onClick={() => setIsEditing(false)}
-                            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-md transition-colors"
+                            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
                             title="キャンセル"
                         >
-                            <X size={18} />
+                            <X size={16} />
                         </button>
                         <button
                             onClick={handleSave}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:opacity-90 transition-opacity shadow-sm"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-md hover:opacity-90 transition-opacity shadow-sm"
                             title="保存"
                         >
-                            <Check size={16} /> 保存
+                            <Check size={14} /> 保存
                         </button>
                     </div>
                 )}
             </div>
 
             {isEditing ? (
-                <div className="flex-1 overflow-hidden p-4">
+                <div className="flex-1 overflow-hidden p-0 relative">
                     <textarea
                         value={localStructure}
                         onChange={(e) => setLocalStructure(e.target.value)}
-                        className="w-full h-full p-3 text-sm font-mono text-foreground bg-secondary/50 border border-border rounded-md focus:ring-2 focus:ring-primary/20 outline-none resize-none"
+                        className="w-full h-full p-6 text-sm font-mono text-foreground bg-background border-none outline-none resize-none leading-relaxed"
                         placeholder="Markdown形式で構成を入力..."
                         onBlur={() => setIsEditing(false)}
                         autoFocus
                     />
                 </div>
             ) : (
-                <ScrollArea className="p-4">
+                <ScrollArea className="flex-1">
                     <div
-                        className="prose prose-sm dark:prose-invert max-w-none min-h-full cursor-text"
+                        className="p-6 min-h-full cursor-text group"
                         onClick={handlePreviewClick}
                     >
                         {structure ? (
                             hasDiff ? (
                                 <div
-                                    className="whitespace-pre-wrap font-sans text-foreground"
+                                    className="whitespace-pre-wrap font-sans text-foreground text-sm leading-relaxed"
                                     dangerouslySetInnerHTML={{ __html: diffHtml }}
                                 />
                             ) : (
-                                <ReactMarkdown>{structure}</ReactMarkdown>
+                                <article className="prose prose-zinc prose-sm dark:prose-invert max-w-none group-hover:bg-accent/10 transition-colors p-2 -m-2 rounded-md">
+                                    <ReactMarkdown>{structure}</ReactMarkdown>
+                                </article>
                             )
                         ) : (
-                            <div className="text-muted-foreground italic text-center py-10 pointer-events-none">構成案がここに表示されます</div>
+                            <div className="flex flex-col items-center justify-center h-40 text-muted-foreground/50 border-2 border-dashed border-border/50 rounded-lg">
+                                <p className="text-sm">構成案がここに表示されます</p>
+                            </div>
                         )}
                     </div>
                 </ScrollArea>
