@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import { Check, X, Undo2, RefreshCw } from 'lucide-react'
 import DiffMatchPatch from 'diff-match-patch'
 import { fetchSSE } from '../utils/sse'
+import ScrollArea from './ui/ScrollArea'
 
 export default function StructurePane() {
     const { structure, prevStructure, updateStructure, memos, updateMemoStatus } = useStore()
@@ -96,30 +97,30 @@ export default function StructurePane() {
     }
 
     return (
-        <div className="pane bg-white flex flex-col h-full">
-            <div className="p-4 border-b border-border flex justify-between items-center bg-white sticky top-0 z-10 shrink-0">
-                <h2 className="font-semibold text-gray-700">Structure Draft</h2>
+        <div className="pane bg-white dark:bg-card flex flex-col h-full">
+            <div className="p-4 border-b border-border flex justify-between items-center bg-card sticky top-0 z-10 shrink-0">
+                <h2 className="font-semibold text-foreground">Structure Draft</h2>
 
                 {/* Action Buttons for Diff */}
                 {hasDiff && !isEditing && (
                     <div className="flex gap-2">
                         <button
                             onClick={handleReload}
-                            className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+                            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-md transition-colors"
                             title="再生成 (Reload)"
                         >
                             <RefreshCw size={18} />
                         </button>
                         <button
                             onClick={handleUndo}
-                            className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                            className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
                             title="取り消し (Undo)"
                         >
                             <Undo2 size={18} />
                         </button>
                         <button
                             onClick={handleConfirm}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white text-sm font-medium rounded-md hover:bg-primary/90 transition-colors shadow-sm"
+                            className="flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:opacity-90 transition-opacity shadow-sm"
                             title="確定 (Confirm)"
                         >
                             <Check size={16} /> 確定
@@ -132,14 +133,14 @@ export default function StructurePane() {
                     <div className="flex gap-2">
                         <button
                             onClick={() => setIsEditing(false)}
-                            className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+                            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-md transition-colors"
                             title="キャンセル"
                         >
                             <X size={18} />
                         </button>
                         <button
                             onClick={handleSave}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-primary text-white text-sm font-medium rounded-md hover:bg-primary/90 transition-colors shadow-sm"
+                            className="flex items-center gap-1 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:opacity-90 transition-opacity shadow-sm"
                             title="保存"
                         >
                             <Check size={16} /> 保存
@@ -148,36 +149,38 @@ export default function StructurePane() {
                 )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                {isEditing ? (
+            {isEditing ? (
+                <div className="flex-1 overflow-hidden p-4">
                     <textarea
                         value={localStructure}
                         onChange={(e) => setLocalStructure(e.target.value)}
-                        className="w-full h-full p-3 text-sm font-mono text-gray-800 bg-gray-50 border border-border rounded-md focus:ring-2 focus:ring-primary/20 outline-none resize-none"
+                        className="w-full h-full p-3 text-sm font-mono text-foreground bg-secondary/50 border border-border rounded-md focus:ring-2 focus:ring-primary/20 outline-none resize-none"
                         placeholder="Markdown形式で構成を入力..."
-                        onBlur={() => setIsEditing(false)} // フォーカス外れたらプレビューに戻る（保存はしない？仕様確認必要だが一旦キャンセル扱いか、あるいは保存するか。ここでは明示的な保存を優先しつつ、利便性のため残す）
+                        onBlur={() => setIsEditing(false)}
                         autoFocus
                     />
-                ) : (
+                </div>
+            ) : (
+                <ScrollArea className="p-4">
                     <div
-                        className="prose prose-sm max-w-none min-h-full cursor-text"
+                        className="prose prose-sm dark:prose-invert max-w-none min-h-full cursor-text"
                         onClick={handlePreviewClick}
                     >
                         {structure ? (
                             hasDiff ? (
                                 <div
-                                    className="whitespace-pre-wrap font-sans text-gray-800"
+                                    className="whitespace-pre-wrap font-sans text-foreground"
                                     dangerouslySetInnerHTML={{ __html: diffHtml }}
                                 />
                             ) : (
                                 <ReactMarkdown>{structure}</ReactMarkdown>
                             )
                         ) : (
-                            <div className="text-gray-400 italic text-center py-10 pointer-events-none">構成案がここに表示されます</div>
+                            <div className="text-muted-foreground italic text-center py-10 pointer-events-none">構成案がここに表示されます</div>
                         )}
                     </div>
-                )}
-            </div>
+                </ScrollArea>
+            )}
         </div>
     )
 }

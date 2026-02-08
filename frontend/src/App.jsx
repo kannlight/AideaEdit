@@ -1,13 +1,17 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import useStore from './store'
-import { RotateCcw } from 'lucide-react'
+import { RotateCcw, Moon, Sun } from 'lucide-react'
 import MemoPane from './components/MemoPane'
 import StructurePane from './components/StructurePane'
 import EditorPane from './components/EditorPane'
 
 function App() {
-    const { memos, structure, prose, resetAll } = useStore()
+    const { memos, structure, prose, resetAll, theme, toggleTheme, initTheme } = useStore()
     const [showResetConfirm, setShowResetConfirm] = useState(false)
+
+    useEffect(() => {
+        initTheme()
+    }, [])
 
     const handleReset = () => {
         const fullText = `Memos:\n${memos.map(m => `- ${m.content}`).join('\n')}\n\nStructure:\n${structure}\n\nProse:\n${prose}`
@@ -20,18 +24,28 @@ function App() {
     return (
         <div className="flex flex-col h-screen bg-background text-foreground">
             {/* Header */}
-            <header className="flex items-center justify-between px-6 py-4 border-b border-border bg-white shadow-sm z-20">
+            <header className="flex items-center justify-between px-6 py-4 border-b border-border bg-card shadow-sm z-20">
                 <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white font-bold">A</div>
+                    <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-foreground font-bold">A</div>
                     <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent">AideaEdit</h1>
                 </div>
-                <button
-                    onClick={() => setShowResetConfirm(true)}
-                    className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-all border border-transparent hover:border-red-100"
-                >
-                    <RotateCcw size={16} />
-                    新規セッション
-                </button>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={toggleTheme}
+                        className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded-md transition-colors"
+                        title={theme === 'light' ? 'ダークモードへ' : 'ライトモードへ'}
+                    >
+                        {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+                    </button>
+                    <div className="h-6 w-px bg-border mx-1"></div>
+                    <button
+                        onClick={() => setShowResetConfirm(true)}
+                        className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-all border border-transparent"
+                    >
+                        <RotateCcw size={16} />
+                        新規セッション
+                    </button>
+                </div>
             </header>
 
             {/* Main Content (3 Panes) */}
