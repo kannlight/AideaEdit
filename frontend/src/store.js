@@ -61,10 +61,21 @@ const useStore = create(
                 memos: state.memos.filter(m => m.id !== id)
             })),
 
-            updateStructure: (newStructure) => set((state) => ({
-                prevStructure: state.structure,
-                structure: newStructure
-            })),
+            updateStructure: (newStructure) => set((state) => {
+                const hasPending = state.memos.some(m => m.status === 'PENDING')
+                if (hasPending) {
+                    // If reviewing AI suggestion, only update current structure.
+                    // Keep prevStructure as the original base to show diffs against.
+                    return { structure: newStructure }
+                } else {
+                    // If regular manual editing, update both.
+                    // This treats manual edits as "Confirmed" immediately, preventing unwanted diffs.
+                    return {
+                        structure: newStructure,
+                        prevStructure: newStructure
+                    }
+                }
+            }),
 
             revertStructure: () => set((state) => {
                 // Find the last PENDING memo to reject

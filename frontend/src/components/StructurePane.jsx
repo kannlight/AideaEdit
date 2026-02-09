@@ -62,6 +62,11 @@ export default function StructurePane() {
     }
 
     const handleKeyDown = (e, index) => {
+        // IME composition check
+        if (e.nativeEvent.isComposing) {
+            return
+        }
+
         if (e.key === 'Enter') {
             e.preventDefault()
             const newLines = [...lines]
@@ -109,12 +114,24 @@ export default function StructurePane() {
             }
             setLines(newLines)
             syncToStore(newLines)
-        } else if (e.key === 'ArrowUp') {
+        } else if (e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p')) {
+            // Allow default behavior if modifiers are pressed with ArrowUp (e.g. Cmd+Up, Alt+Up)
+            // But intercept Ctrl+P explicitly
+            if (e.key === 'ArrowUp' && (e.metaKey || e.ctrlKey || e.altKey)) {
+                return
+            }
+
             if (index > 0) {
                 e.preventDefault()
                 setEditingIndex(index - 1)
             }
-        } else if (e.key === 'ArrowDown') {
+        } else if (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')) {
+            // Allow default behavior if modifiers are pressed with ArrowDown (e.g. Cmd+Down, Alt+Down)
+            // But intercept Ctrl+N explicitly
+            if (e.key === 'ArrowDown' && (e.metaKey || e.ctrlKey || e.altKey)) {
+                return
+            }
+
             if (index < lines.length - 1) {
                 e.preventDefault()
                 setEditingIndex(index + 1)
