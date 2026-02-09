@@ -16,3 +16,7 @@ build/
 # IDE and OS files
 .vscode/
 .DS_Store
+
+# task instructions document
+task_instructions/
+
