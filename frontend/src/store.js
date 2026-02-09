@@ -11,6 +11,7 @@ const useStore = create(
             isGeneratingStructure: false,
             isGeneratingProse: false,
             theme: 'light', // 'light' or 'dark'
+            viewMode: 'planning', // 'planning' | 'writing'
 
             toggleTheme: () => set((state) => {
                 const newTheme = state.theme === 'light' ? 'dark' : 'light'
@@ -21,6 +22,8 @@ const useStore = create(
                 }
                 return { theme: newTheme }
             }),
+
+            setViewMode: (mode) => set({ viewMode: mode }),
 
             initTheme: () => {
                 const state = get()

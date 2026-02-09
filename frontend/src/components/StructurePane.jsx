@@ -2,45 +2,26 @@ import React, { useState, useEffect } from 'react'
 import useStore from '../store'
 import ReactMarkdown from 'react-markdown'
 import { Check, X, Undo2, RefreshCw } from 'lucide-react'
-import DiffMatchPatch from 'diff-match-patch'
 import { fetchSSE } from '../utils/sse'
 import ScrollArea from './ui/ScrollArea'
+import { useDiff } from '../hooks/useDiff'
 
 export default function StructurePane() {
     const { structure, prevStructure, updateStructure, memos, updateMemoStatus, startStructureGeneration, endStructureGeneration, updateStructureStream } = useStore()
     const [isEditing, setIsEditing] = useState(false)
     const [localStructure, setLocalStructure] = useState(structure)
-    const [diffHtml, setDiffHtml] = useState('')
+
+    // useDiff hook implementation
+    const { diffHtml, hasDiff } = useDiff(structure, prevStructure)
 
     // 最新のPENDINGメモを取得
     const pendingMemo = memos.findLast(m => m.status === 'PENDING')
-    const hasDiff = prevStructure && structure && prevStructure !== structure
 
     useEffect(() => {
         if (!isEditing) {
             setLocalStructure(structure)
         }
     }, [structure, isEditing])
-
-    useEffect(() => {
-        if (hasDiff) {
-            const dmp = new DiffMatchPatch()
-            const diffs = dmp.diff_main(prevStructure, structure)
-            dmp.diff_cleanupSemantic(diffs)
-
-            const html = diffs.map(([op, text]) => {
-                const safeText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                if (op === 1) { // Insert
-                    return `<span class="bg-green-500/20 text-green-700 dark:text-green-300 px-1 rounded mx-0.5">${safeText}</span>`
-                } else if (op === -1) { // Delete
-                    return `<span class="bg-destructive/10 text-destructive px-1 rounded line-through opacity-60 text-xs mx-0.5">${safeText}</span>`
-                }
-                return safeText
-            }).join('')
-
-            setDiffHtml(html)
-        }
-    }, [structure, prevStructure, hasDiff])
 
     const handleConfirm = () => {
         if (pendingMemo) {

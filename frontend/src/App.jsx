@@ -6,7 +6,7 @@ import StructurePane from './components/StructurePane'
 import EditorPane from './components/EditorPane'
 
 function App() {
-    const { memos, structure, prose, resetAll, theme, toggleTheme, initTheme } = useStore()
+    const { memos, structure, prose, resetAll, theme, toggleTheme, initTheme, viewMode, setViewMode } = useStore()
     const [showResetConfirm, setShowResetConfirm] = useState(false)
 
     useEffect(() => {
@@ -28,6 +28,21 @@ function App() {
                 <div className="flex items-center gap-3">
                     <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-foreground font-bold shadow-sm">A</div>
                     <h1 className="text-xl font-bold tracking-tight">AideaEdit</h1>
+                    <div className="h-6 w-px bg-border mx-2"></div>
+                    <div className="flex bg-muted p-1 rounded-md">
+                        <button
+                            onClick={() => setViewMode('planning')}
+                            className={`px-3 py-1 text-xs font-medium rounded-sm transition-all ${viewMode === 'planning' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                        >
+                            Planning
+                        </button>
+                        <button
+                            onClick={() => setViewMode('writing')}
+                            className={`px-3 py-1 text-xs font-medium rounded-sm transition-all ${viewMode === 'writing' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                        >
+                            Writing
+                        </button>
+                    </div>
                 </div>
                 <div className="flex items-center gap-3">
                     <button
@@ -48,22 +63,26 @@ function App() {
                 </div>
             </header>
 
-            {/* Main Content (3 Panes) - PC Layout */}
+            {/* Main Content (Panes) */}
             <main className="flex-1 flex overflow-hidden divide-x divide-border">
-                {/* Memo Pane: Fixed width or percentage, resizable logic omitted for simplicity but making it flexible */}
-                <div className="w-[300px] shrink-0 flex flex-col min-w-[250px]">
-                    <MemoPane />
-                </div>
+                {viewMode === 'planning' ? (
+                    <>
+                        {/* Memo Pane */}
+                        <div className="w-1/3 shrink-0 flex flex-col min-w-[300px]">
+                            <MemoPane />
+                        </div>
 
-                {/* Structure Pane */}
-                <div className="w-[400px] shrink-0 flex flex-col min-w-[300px]">
-                    <StructurePane />
-                </div>
-
-                {/* Editor Pane: Takes remaining space */}
-                <div className="flex-1 flex flex-col min-w-[400px]">
-                    <EditorPane />
-                </div>
+                        {/* Structure Pane (Takes remaining space in Planning mode) */}
+                        <div className="flex-1 flex flex-col min-w-[300px]">
+                            <StructurePane />
+                        </div>
+                    </>
+                ) : (
+                    /* Editor Pane (Full Width in Writing mode) */
+                    <div className="flex-1 flex flex-col min-w-[400px]">
+                        <EditorPane />
+                    </div>
+                )}
             </main>
 
             {/* Reset Confirmation Overlay */}
