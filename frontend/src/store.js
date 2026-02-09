@@ -66,6 +66,44 @@ const useStore = create(
                 structure: newStructure
             })),
 
+            revertStructure: () => set((state) => {
+                // Find the last PENDING memo to reject
+                const pendingMemo = state.memos.findLast(m => m.status === 'PENDING')
+                const updatedMemos = pendingMemo
+                    ? state.memos.map(m => m.id === pendingMemo.id ? { ...m, status: 'REJECTED' } : m)
+                    : state.memos
+
+                return {
+                    structure: state.prevStructure,
+                    // Critical: Do NOT swap structure and prevStructure.
+                    // We are reverting to the confirmed state. The pending state is discarded.
+                    // prevStructure remains as the confirmed state (which is what we reverted to).
+                    // Actually, if we revert, the "current" structure becomes what was "previous".
+                    // But effectively, we just want to discard the change.
+                    // So we set structure = prevStructure.
+                    // We can keep prevStructure as is, or maybe it should theoretically stay same?
+                    // If A -> B (pending), prev=A, curr=B.
+                    // Revert: curr=A. prev=A.
+                    prevStructure: state.prevStructure,
+                    memos: updatedMemos
+                }
+            }),
+
+            confirmStructure: () => set((state) => {
+                // Find the last PENDING memo to apply
+                const pendingMemo = state.memos.findLast(m => m.status === 'PENDING')
+                const updatedMemos = pendingMemo
+                    ? state.memos.map(m => m.id === pendingMemo.id ? { ...m, status: 'APPLIED' } : m)
+                    : state.memos
+
+                return {
+                    // Confirming means the current structure is now the accepted baseline.
+                    // So prevStructure becomes the current structure.
+                    prevStructure: state.structure,
+                    memos: updatedMemos
+                }
+            }),
+
             startStructureGeneration: (currentStructure) => set({
                 prevStructure: currentStructure,
                 isGeneratingStructure: true
