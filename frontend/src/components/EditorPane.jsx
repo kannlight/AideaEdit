@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react'
 import useStore from '../store'
-import { Sparkles, Wand2, Copy, Check, Undo2, RefreshCw } from 'lucide-react'
+import { Sparkles, Wand2, Copy, Check, Undo2, RefreshCw, X } from 'lucide-react'
 import { useDiff } from '../hooks/useDiff'
 import { fetchSSE } from '../utils/sse'
 import ScrollArea from './ui/ScrollArea'
@@ -14,7 +14,8 @@ export default function EditorPane() {
         startProseGeneration,
         endProseGeneration,
         revertProse,
-        confirmProse
+        confirmProse,
+        updatePrevProse
     } = useStore()
     const [format, setFormat] = useState('Plain')
     const [instruction, setInstruction] = useState('')
@@ -24,6 +25,10 @@ export default function EditorPane() {
 
     const [selection, setSelection] = useState({ start: 0, end: 0 })
     const [selectionMenu, setSelectionMenu] = useState({ show: false, x: 0, y: 0 })
+
+    // Partial Diff Logic
+    const [diffSelection, setDiffSelection] = useState(null) // { indices: Set<number>, x, y }
+
     const textareaRef = useRef(null)
     const inputRef = useRef(null)
 
@@ -31,7 +36,7 @@ export default function EditorPane() {
     const highlightRef = useRef(null)
     const lastGenerationRef = useRef(null) // Stores context for retry: { type: 'create' | 'refine', args: {} }
 
-    const { diffHtml, hasDiff } = useDiff(prose, prevProse)
+    const { diffHtml, hasDiff, diffs } = useDiff(prose, prevProse)
 
     // Scroll synchronization is not needed if check Overlay is inside the same scroll container
     // However, if textarea scrolls independently, we need it. 
@@ -107,6 +112,158 @@ export default function EditorPane() {
             endProseGeneration()
         }
     }
+
+    const getSubstitutionPairs = (indices, currentDiffs) => {
+        const newIndices = new Set(indices)
+
+        // Loop through all selected indices to find pairs
+        indices.forEach(index => {
+            const currentOp = currentDiffs[index][0]
+
+            // If current is Delete (-1), look for next Insert (1)
+            if (currentOp === -1) {
+                const nextDiff = currentDiffs[index + 1]
+                if (nextDiff && nextDiff[0] === 1) {
+                    newIndices.add(index + 1)
+                }
+            }
+
+            // If current is Insert (1), look for prev Delete (-1)
+            if (currentOp === 1) {
+                const prevDiff = currentDiffs[index - 1]
+                if (prevDiff && prevDiff[0] === -1) {
+                    newIndices.add(index - 1)
+                }
+            }
+        })
+
+        return newIndices
+    }
+
+    const handleDiffClick = (e, index) => {
+        e.stopPropagation()
+        // Determine position relative to pane
+        const paneRect = e.currentTarget.closest('.pane').getBoundingClientRect()
+        const targetRect = e.currentTarget.getBoundingClientRect()
+
+        // Check for substitution pairs
+        const initialIndices = new Set([index])
+        const expandedIndices = getSubstitutionPairs(initialIndices, diffs)
+
+        setDiffSelection({
+            indices: expandedIndices,
+            x: targetRect.right - paneRect.left + 5,
+            y: targetRect.top - paneRect.top + (targetRect.height / 2)
+        })
+    }
+
+    const handleDiffSelection = (e) => {
+        const selection = window.getSelection()
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return
+
+        const range = selection.getRangeAt(0)
+        const pane = e.currentTarget.closest('.pane')
+        if (!pane) return
+
+        const diffSpans = pane.querySelectorAll('[data-diff-index]')
+        const selectedIndices = new Set()
+
+        // Find all diff spans that intersect with the selection
+        diffSpans.forEach(span => {
+            if (selection.containsNode(span, true)) {
+                // Check if it's actually a diff (indices are on all spans, even equal ones?)
+                // Our implementation adds data-diff-index to ONLY diff spans (colorized ones) or all?
+                // Logic below renders all with data-diff-index.
+                // We only care about diffs (op !== 0).
+                const op = parseInt(span.getAttribute('data-diff-op'))
+                if (op !== 0) {
+                    selectedIndices.add(parseInt(span.getAttribute('data-diff-index')))
+                }
+            }
+        })
+
+        if (selectedIndices.size > 0) {
+            const rect = range.getBoundingClientRect()
+            const paneRect = pane.getBoundingClientRect()
+
+            // Expand selection to include substitution pairs
+            const expandedIndices = getSubstitutionPairs(selectedIndices, diffs)
+
+            setDiffSelection({
+                indices: expandedIndices,
+                x: rect.right - paneRect.left + 5,
+                y: rect.top - paneRect.top + (rect.height / 2)
+            })
+
+            // Clear browser selection slightly to avoid UI clutter? 
+            // Or keep it to show what is selected? Better keep it.
+        } else {
+            // If clicked but no diffs selected (e.g. only normal text selected), do nothing or clear?
+            // Existing click handler handles click.
+            // This is for range selection.
+        }
+    }
+
+    const handlePartialConfirm = () => {
+        if (!diffSelection) return
+
+        let newPrevProse = ''
+        diffs.forEach((d, i) => {
+            const [op, text] = d
+
+            // If this chunk is in the selection...
+            if (diffSelection.indices.has(i)) {
+                if (op === 1) { // Confirm Insertion: Add to prevProse
+                    newPrevProse += text
+                }
+                // If op === -1: Confirm Deletion: Skip adding to prevProse
+            } else {
+                // Not selected. Keep history (prevProse) structure.
+                // But wait. 'prevProse' structure depends on whether the chunk WAS in it.
+                // If op === 0: In prevProse. Add.
+                // If op === 1: Inserted. Not in prevProse. Skip.
+                // If op === -1: Deleted. Was in prevProse. Add.
+
+                if (op === 0 || op === -1) {
+                    newPrevProse += text
+                }
+            }
+        })
+
+        updatePrevProse(newPrevProse)
+        setDiffSelection(null)
+        window.getSelection()?.removeAllRanges() // Clear selection
+    }
+
+    const handlePartialReject = () => {
+        if (!diffSelection) return
+
+        let newProse = ''
+        diffs.forEach((d, i) => {
+            const [op, text] = d
+
+            if (diffSelection.indices.has(i)) {
+                if (op === -1) { // Reject Deletion: Add back to prose
+                    newProse += text
+                }
+                // If op === 1: Reject Insertion: Skip adding to prose
+            } else {
+                // Not selected. Keep current prose structure.
+                if (op === 0 || op === 1) {
+                    newProse += text
+                }
+            }
+        })
+
+        updateProse(newProse, true)
+        setDiffSelection(null)
+        window.getSelection()?.removeAllRanges() // Clear selection
+    }
+
+    // Determine the content parts for the overlay
+    const beforeHighlight = prose ? prose.substring(0, selection.start) : ''
+    const highlightedText = prose ? prose.substring(selection.start, selection.end) : ''
+    const afterHighlight = prose ? prose.substring(selection.end) : ''
 
     const handleSelect = (e) => {
         const start = e.target.selectionStart
@@ -244,10 +401,50 @@ export default function EditorPane() {
         }
     }
 
-    // Determine the content parts for the overlay
-    const beforeHighlight = prose ? prose.substring(0, selection.start) : ''
-    const highlightedText = prose ? prose.substring(selection.start, selection.end) : ''
-    const afterHighlight = prose ? prose.substring(selection.end) : ''
+    // Actually I can't update store without tool call.
+    // I will use a trick: 
+    // If I want to update prevProse, I can calculate the new prevProse AND new structure? No.
+    // I MUST ADD updatePrevProse to store. 
+
+    // RE-PLAN: I will add 'updatePrevProse' to store.js in the next step or right now if possible?
+    // I can't do two files in one step properly if functionality depends on it.
+    // But wait, the previous plan didn't explicitly say "add updatePrevProse". 
+    // It said "handlePartialConfirm updating prevProse".
+
+    // Let's implement the logic assuming the function exists, then I will add it to store.js.
+    // Or I can pause and add it to store.js now.
+
+    // Let's do store.js modification in a separate turn? 
+    // No, I can do multi_replace on store.js too? 
+    // Yes, I can do multiple calls.
+
+    // Wait, let's look at handlePartialReject.
+    // Reject Insertion: Remove from 'prose'.
+    // Reject Deletion: Add back to 'prose'.
+    // behavior: updateProse(newProse, isAuto=true).
+    // usage of isAuto=true keeps prevProse AS IS.
+    // So 'prose' changes, 'prevProse' stays same. This effectively "Undo"s the diff.
+    // Logic:
+    // Insert (1) -> Reject -> Remove from prose. prevProse didn't have it. Result: Equal.
+    // Delete (-1) -> Reject -> Add to prose. prevProse had it. Result: Equal.
+
+    // So Rejecting CAN be done with existing `updateProse`.
+
+    // Confirming REQUIRES updating `prevProse`.
+    // Existing actions: `confirmProse` (all), `updateProse` (all or prose only).
+    // `revertProse` (prose = prev).
+
+    // I DO NOT have a way to update `prevProse` arbitrarily.
+    // I must add `updatePrevProse` to store.js.
+
+    // I will invoke the store update tool first in this turn? No, I am already committed to this tool call.
+    // I will write the code here assuming `updatePrevProse` is passed from store.
+    // And I will add it to `useStore` destructuring.
+    // And I will update store.js in the next step.
+
+    // Wait, let's keep it clean.
+    // I'll render the UI first.
+
 
     return (
         <div className="pane bg-background flex flex-col h-full relative">
@@ -322,8 +519,32 @@ export default function EditorPane() {
                             {hasDiff ? (
                                 <div
                                     className="whitespace-pre-wrap font-serif text-lg leading-relaxed text-foreground"
-                                    dangerouslySetInnerHTML={{ __html: diffHtml }}
-                                />
+                                    onMouseUp={handleDiffSelection}
+                                >
+                                    {diffs.map(([op, text], index) => {
+                                        const isDiff = op !== 0
+                                        const isInsert = op === 1
+                                        return (
+                                            <span
+                                                key={index}
+                                                data-diff-index={index}
+                                                data-diff-op={op}
+                                                onClick={isDiff ? (e) => handleDiffClick(e, index) : undefined}
+                                                className={`
+                                                    ${isDiff ? 'cursor-pointer px-1 rounded mx-0.5 transition-colors' : ''}
+                                                    ${isInsert
+                                                        ? 'bg-green-500/20 text-green-700 dark:text-green-300 hover:bg-green-500/30'
+                                                        : op === -1 ? 'bg-destructive/10 text-destructive line-through opacity-60 hover:bg-destructive/20 hover:opacity-100' : ''
+                                                    }
+                                                    ${diffSelection?.indices.has(index) ? 'ring-2 ring-primary ring-offset-1' : ''}
+                                                `}
+                                                title={isDiff ? (isInsert ? "クリックして操作: 追加箇所" : "クリックして操作: 削除箇所") : undefined}
+                                            >
+                                                {text}
+                                            </span>
+                                        )
+                                    })}
+                                </div>
                             ) : (
                                 <>
                                     {/* Highlight Overlay */}
@@ -362,7 +583,7 @@ export default function EditorPane() {
                     </div>
                 )}
 
-                {/* Selection Menu Popup */}
+                {/* Selection Menu Popup for Refine */}
                 {selectionMenu.show && (
                     <div
                         className="absolute z-50 animate-in fade-in zoom-in-95 duration-100"
@@ -374,6 +595,29 @@ export default function EditorPane() {
                         >
                             <Sparkles size={12} />
                             この部分を修正
+                        </button>
+                    </div>
+                )}
+
+                {/* Partial Diff Action Popover */}
+                {diffSelection && (
+                    <div
+                        className="absolute z-50 animate-in fade-in zoom-in-95 duration-100 bg-popover border border-border rounded-lg shadow-lg p-1.5 flex gap-1 transform -translate-y-1/2"
+                        style={{ top: diffSelection.y, left: diffSelection.x }}
+                    >
+                        <button
+                            onClick={handlePartialConfirm}
+                            className="p-1.5 bg-green-500/10 text-green-600 hover:bg-green-500/20 rounded-md transition-colors"
+                            title="選択した変更を確定 (Confirm)"
+                        >
+                            <Check size={16} />
+                        </button>
+                        <button
+                            onClick={handlePartialReject}
+                            className="p-1.5 bg-destructive/10 text-destructive hover:bg-destructive/20 rounded-md transition-colors"
+                            title="選択した変更を取り消し (Undo)"
+                        >
+                            <X size={16} />
                         </button>
                     </div>
                 )}

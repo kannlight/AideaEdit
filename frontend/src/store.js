@@ -165,6 +165,8 @@ const useStore = create(
                 isGeneratingProse: false
             }),
 
+            updatePrevProse: (newPrevProse) => set({ prevProse: newPrevProse }),
+
             resetAll: () => {
                 set({
                     memos: [],
