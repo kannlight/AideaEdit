@@ -1,11 +1,21 @@
 import React, { useState, useRef } from 'react'
 import useStore from '../store'
-import { Sparkles, Wand2, Copy, Check } from 'lucide-react'
+import { Sparkles, Wand2, Copy, Check, Undo2, RefreshCw } from 'lucide-react'
+import { useDiff } from '../hooks/useDiff'
 import { fetchSSE } from '../utils/sse'
 import ScrollArea from './ui/ScrollArea'
 
 export default function EditorPane() {
-    const { structure, prose, updateProse } = useStore()
+    const {
+        structure,
+        prose,
+        prevProse,
+        updateProse,
+        startProseGeneration,
+        endProseGeneration,
+        revertProse,
+        confirmProse
+    } = useStore()
     const [format, setFormat] = useState('Plain')
     const [instruction, setInstruction] = useState('')
     const [isGenerating, setIsGenerating] = useState(false)
@@ -19,6 +29,9 @@ export default function EditorPane() {
 
     const [showHighlight, setShowHighlight] = useState(false)
     const highlightRef = useRef(null)
+    const lastGenerationRef = useRef(null) // Stores context for retry: { type: 'create' | 'refine', args: {} }
+
+    const { diffHtml, hasDiff } = useDiff(prose, prevProse)
 
     // Scroll synchronization is not needed if check Overlay is inside the same scroll container
     // However, if textarea scrolls independently, we need it. 
@@ -32,7 +45,11 @@ export default function EditorPane() {
 
     const handleGenerate = async () => {
         if (!structure) return
+
+        lastGenerationRef.current = { type: 'create', args: { structure, format } }
+
         setIsGenerating(true)
+        startProseGeneration() // Snapshot current prose
         let fullProse = ''
 
         await fetchSSE('/api/prose/generate', {
@@ -40,15 +57,32 @@ export default function EditorPane() {
             body: JSON.stringify({ structure, format })
         }, (data) => {
             fullProse += data.content
-            updateProse(fullProse)
+            updateProse(fullProse, true) // isAuto = true
         }, () => {
             setIsGenerating(false)
+            endProseGeneration()
         })
     }
 
     const handleRefine = async () => {
         if (!prose || !instruction) return
+
+        // Ensure we capture parameters relative to the *current* state (which will become prevProse)
+        lastGenerationRef.current = {
+            type: 'refine',
+            args: {
+                full_text: prose, // This will be prevProse after startProseGeneration? No, start snapshots it.
+                // Actually, if we retry, we revert. So 'prose' becomes what it was.
+                // So storing 'prose' here is correct for the initial call.
+                // For retry, we need to re-use this context.
+                instruction,
+                selected_start: selection.start,
+                selected_end: selection.end
+            }
+        }
+
         setIsRefining(true)
+        startProseGeneration()
 
         try {
             const response = await fetch('/api/prose/refine', {
@@ -62,14 +96,15 @@ export default function EditorPane() {
                 })
             })
             const data = await response.json()
-            updateProse(data.refined_content)
+            updateProse(data.refined_content, true) // isAuto = true
             setInstruction('')
             setSelectionMenu({ ...selectionMenu, show: false })
-            setShowHighlight(false) // Clear highlight after sending
+            setShowHighlight(false)
         } catch (err) {
             console.error('Refine failed', err)
         } finally {
             setIsRefining(false)
+            endProseGeneration()
         }
     }
 
@@ -137,6 +172,78 @@ export default function EditorPane() {
         setTimeout(() => setCopied(false), 2000)
     }
 
+    const handleUndo = () => {
+        revertProse()
+    }
+
+    const handleConfirm = () => {
+        confirmProse()
+    }
+
+    const handleRetry = async () => {
+        if (!lastGenerationRef.current) return
+
+        handleUndo() // Revert first to restore original state
+
+        // Wait for state update? In React batching, state updates might not be immediate for read, 
+        // but since we dispatch the fetch in the same event loop (or async), we need to be careful.
+        // Actually, 'revertProse' updates store. 'prose' variable in this scope is stale.
+        // We should use the args stored in ref.
+
+        const { type, args } = lastGenerationRef.current
+
+        if (type === 'create') {
+            // Re-run create
+            // We need to re-trigger handleGenerate logic but bypass the 'if (!structure)' check if structure is in args
+            // But handleGenerate uses state 'structure'. 
+            // args.structure should be correct.
+
+            setIsGenerating(true)
+            startProseGeneration() // Snapshot (effectively prev=prev)
+            let fullProse = ''
+
+            await fetchSSE('/api/prose/generate', {
+                method: 'POST',
+                body: JSON.stringify({ structure: args.structure, format: args.format })
+            }, (data) => {
+                fullProse += data.content
+                updateProse(fullProse, true)
+            }, () => {
+                setIsGenerating(false)
+                endProseGeneration()
+            })
+
+        } else if (type === 'refine') {
+            setIsRefining(true)
+            startProseGeneration()
+
+            try {
+                // For refine, args.full_text was the text BEFORE the *last* refinement.
+                // Since we reverted, 'prose' in store is now that text.
+                // We use args.full_text to be safe.
+
+                const response = await fetch('/api/prose/refine', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        full_text: args.full_text,
+                        instruction: args.instruction,
+                        selected_start: args.selected_start,
+                        selected_end: args.selected_end
+                    })
+                })
+                const data = await response.json()
+                updateProse(data.refined_content, true)
+                // Note: instruction is already cleared in UI, but we don't need to restore it to input
+            } catch (err) {
+                console.error('Retry Refine failed', err)
+            } finally {
+                setIsRefining(false)
+                endProseGeneration()
+            }
+        }
+    }
+
     // Determine the content parts for the overlay
     const beforeHighlight = prose ? prose.substring(0, selection.start) : ''
     const highlightedText = prose ? prose.substring(selection.start, selection.end) : ''
@@ -159,6 +266,34 @@ export default function EditorPane() {
                     </select>
                 </div>
                 <div className="flex gap-2 items-center">
+                    {/* Diff Actions */}
+                    {hasDiff && (
+                        <div className="flex gap-1 items-center animate-in fade-in slide-in-from-right-4 duration-300 mr-2">
+                            <button
+                                onClick={handleRetry}
+                                className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
+                                title="再生成 (Reload)"
+                            >
+                                <RefreshCw size={16} />
+                            </button>
+                            <button
+                                onClick={handleUndo}
+                                className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
+                                title="取り消し (Undo)"
+                            >
+                                <Undo2 size={16} />
+                            </button>
+                            <div className="w-px h-4 bg-border mx-1"></div>
+                            <button
+                                onClick={handleConfirm}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-md hover:opacity-90 transition-opacity shadow-sm"
+                                title="確定 (Confirm)"
+                            >
+                                <Check size={14} /> 確定
+                            </button>
+                        </div>
+                    )}
+
                     <button
                         onClick={handleCopy}
                         disabled={!prose}
@@ -167,14 +302,16 @@ export default function EditorPane() {
                     >
                         {copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
                     </button>
-                    <button
-                        onClick={handleGenerate}
-                        disabled={!structure || isGenerating}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-md hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                    >
-                        <Sparkles size={14} />
-                        {isGenerating ? '生成中...' : '構成から生成'}
-                    </button>
+                    {!hasDiff && (
+                        <button
+                            onClick={handleGenerate}
+                            disabled={!structure || isGenerating}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-md hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                        >
+                            <Sparkles size={14} />
+                            {isGenerating ? '生成中...' : '構成から生成'}
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -182,29 +319,38 @@ export default function EditorPane() {
                 {prose ? (
                     <ScrollArea className="flex-1">
                         <div className="max-w-3xl mx-auto w-full p-8 min-h-full relative">
-                            {/* Highlight Overlay */}
-                            {showHighlight && (
+                            {hasDiff ? (
                                 <div
-                                    className="absolute inset-0 p-0 pointer-events-none whitespace-pre-wrap text-lg leading-relaxed font-serif text-transparent"
-                                    style={{ top: 32, left: 32, right: 32, bottom: 32 }} // Match padding p-8 (32px)
-                                >
-                                    <span>{beforeHighlight}</span>
-                                    <span className="bg-primary/20">{highlightedText}</span>
-                                    <span>{afterHighlight}</span>
-                                </div>
-                            )}
+                                    className="whitespace-pre-wrap font-serif text-lg leading-relaxed text-foreground"
+                                    dangerouslySetInnerHTML={{ __html: diffHtml }}
+                                />
+                            ) : (
+                                <>
+                                    {/* Highlight Overlay */}
+                                    {showHighlight && (
+                                        <div
+                                            className="absolute inset-0 p-0 pointer-events-none whitespace-pre-wrap text-lg leading-relaxed font-serif text-transparent"
+                                            style={{ top: 32, left: 32, right: 32, bottom: 32 }} // Match padding p-8 (32px)
+                                        >
+                                            <span>{beforeHighlight}</span>
+                                            <span className="bg-primary/20">{highlightedText}</span>
+                                            <span>{afterHighlight}</span>
+                                        </div>
+                                    )}
 
-                            <textarea
-                                ref={textareaRef}
-                                value={prose}
-                                onChange={(e) => updateProse(e.target.value)}
-                                onSelect={handleSelect}
-                                onMouseUp={handleMouseUp}
-                                onFocus={handleTextAreaFocus}
-                                className="w-full h-full min-h-[calc(100vh-200px)] p-0 border-none focus:ring-0 resize-none bg-transparent outline-none text-foreground text-lg leading-relaxed font-serif transition-colors relative z-10"
-                                spellCheck="false"
-                                placeholder="ここに文章が生成されます..."
-                            />
+                                    <textarea
+                                        ref={textareaRef}
+                                        value={prose}
+                                        onChange={(e) => updateProse(e.target.value)} // Manual edit -> isAuto = false (default)
+                                        onSelect={handleSelect}
+                                        onMouseUp={handleMouseUp}
+                                        onFocus={handleTextAreaFocus}
+                                        className="w-full h-full min-h-[calc(100vh-200px)] p-0 border-none focus:ring-0 resize-none bg-transparent outline-none text-foreground text-lg leading-relaxed font-serif transition-colors relative z-10"
+                                        spellCheck="false"
+                                        placeholder="ここに文章が生成されます..."
+                                    />
+                                </>
+                            )}
                         </div>
                     </ScrollArea>
                 ) : (

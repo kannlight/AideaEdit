@@ -8,6 +8,7 @@ const useStore = create(
             structure: '',
             prevStructure: '',
             prose: '',
+            prevProse: '',
             isGeneratingStructure: false,
             isGeneratingProse: false,
             theme: 'light', // 'light' or 'dark'
@@ -132,7 +133,37 @@ const useStore = create(
                 memos: state.memos.map(m => m.id === id ? { ...m, status } : m)
             })),
 
-            updateProse: (newProse) => set({ prose: newProse }),
+            updateProse: (newProse, isAuto = false) => set((state) => {
+                if (isAuto) {
+                    // AI generation: Update current prose only.
+                    // Keep prevProse as the baseline for diff.
+                    return { prose: newProse }
+                } else {
+                    // Manual edit: Update both.
+                    // This treats manual edits as confirmed immediately.
+                    return {
+                        prose: newProse,
+                        prevProse: newProse
+                    }
+                }
+            }),
+
+            revertProse: () => set((state) => ({
+                prose: state.prevProse
+            })),
+
+            confirmProse: () => set((state) => ({
+                prevProse: state.prose
+            })),
+
+            startProseGeneration: () => set((state) => ({
+                prevProse: state.prose,
+                isGeneratingProse: true
+            })),
+
+            endProseGeneration: () => set({
+                isGeneratingProse: false
+            }),
 
             resetAll: () => {
                 set({
@@ -140,6 +171,7 @@ const useStore = create(
                     structure: '',
                     prevStructure: '',
                     prose: '',
+                    prevProse: '',
                     isGeneratingStructure: false,
                     isGeneratingProse: false,
                 })
