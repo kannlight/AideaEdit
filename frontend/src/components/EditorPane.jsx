@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import useStore from '../store'
 import { Sparkles, Wand2, Copy, Check, Undo2, RefreshCw, X } from 'lucide-react'
 import { useDiff } from '../hooks/useDiff'
@@ -34,6 +34,7 @@ export default function EditorPane() {
 
     const [showHighlight, setShowHighlight] = useState(false)
     const highlightRef = useRef(null)
+    const contentRef = useRef(null)
     const lastGenerationRef = useRef(null) // Stores context for retry: { type: 'create' | 'refine', args: {} }
 
     const { diffHtml, hasDiff, diffs } = useDiff(prose, prevProse)
@@ -140,21 +141,50 @@ export default function EditorPane() {
         return newIndices
     }
 
+    const getSelectionPosition = (indices) => {
+        if (!contentRef.current || indices.size === 0) return null
+
+        let minTop = Infinity
+        let maxRight = -Infinity
+
+        indices.forEach(index => {
+            const span = contentRef.current.querySelector(`[data-diff-index="${index}"]`)
+            if (span) {
+                const rect = span.getBoundingClientRect()
+                if (rect.top < minTop) minTop = rect.top
+                if (rect.right > maxRight) maxRight = rect.right
+            }
+        })
+
+        if (minTop === Infinity) return null
+
+        const containerRect = contentRef.current.getBoundingClientRect()
+
+        return {
+            x: maxRight - containerRect.left + 5,
+            y: minTop - containerRect.top
+        }
+    }
+
     const handleDiffClick = (e, index) => {
         e.stopPropagation()
-        // Determine position relative to pane
-        const paneRect = e.currentTarget.closest('.pane').getBoundingClientRect()
-        const targetRect = e.currentTarget.getBoundingClientRect()
+        // Determine position relative to the scrollable container (parent of spans' wrapper)
+        // Spans are in the div with handleDiffSelection. Its parent is the .relative container (p-8).
+        const container = e.currentTarget.closest('.relative')
+        if (!container) return
 
         // Check for substitution pairs
         const initialIndices = new Set([index])
         const expandedIndices = getSubstitutionPairs(initialIndices, diffs)
 
-        setDiffSelection({
-            indices: expandedIndices,
-            x: targetRect.right - paneRect.left + 5,
-            y: targetRect.top - paneRect.top + (targetRect.height / 2)
-        })
+        const pos = getSelectionPosition(expandedIndices)
+        if (pos) {
+            setDiffSelection({
+                indices: expandedIndices,
+                x: pos.x,
+                y: pos.y
+            })
+        }
     }
 
     const handleDiffSelection = (e) => {
@@ -183,17 +213,18 @@ export default function EditorPane() {
         })
 
         if (selectedIndices.size > 0) {
-            const rect = range.getBoundingClientRect()
-            const paneRect = pane.getBoundingClientRect()
-
             // Expand selection to include substitution pairs
             const expandedIndices = getSubstitutionPairs(selectedIndices, diffs)
 
-            setDiffSelection({
-                indices: expandedIndices,
-                x: rect.right - paneRect.left + 5,
-                y: rect.top - paneRect.top + (rect.height / 2)
-            })
+            const pos = getSelectionPosition(expandedIndices)
+
+            if (pos) {
+                setDiffSelection({
+                    indices: expandedIndices,
+                    x: pos.x,
+                    y: pos.y
+                })
+            }
 
             // Clear browser selection slightly to avoid UI clutter? 
             // Or keep it to show what is selected? Better keep it.
@@ -260,6 +291,19 @@ export default function EditorPane() {
         window.getSelection()?.removeAllRanges() // Clear selection
     }
 
+    useEffect(() => {
+        if (!diffSelection) return
+
+        const handleClickOutside = (e) => {
+            // Ignore clicks inside the popover or on diff spans
+            if (e.target.closest('[data-diff-action-menu]') || e.target.closest('[data-diff-index]')) return
+            setDiffSelection(null)
+        }
+
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [diffSelection])
+
     // Determine the content parts for the overlay
     const beforeHighlight = prose ? prose.substring(0, selection.start) : ''
     const highlightedText = prose ? prose.substring(selection.start, selection.end) : ''
@@ -297,14 +341,12 @@ export default function EditorPane() {
 
         if (start !== end) {
             // マウスカーソルの位置に表示
-            const rect = textareaRef.current.getBoundingClientRect()
-            // paneのrect
-            const paneRect = e.currentTarget.closest('.pane').getBoundingClientRect()
+            const containerRect = contentRef.current.getBoundingClientRect()
 
             setSelectionMenu({
                 show: true,
-                x: e.clientX - paneRect.left,
-                y: e.clientY - paneRect.top + 10 // 少し下にずらす
+                x: e.clientX - containerRect.left,
+                y: e.clientY - containerRect.top + 10 // 少し下にずらす
             })
         } else {
             setSelectionMenu({ ...selectionMenu, show: false })
@@ -515,36 +557,60 @@ export default function EditorPane() {
             <div className="flex-1 flex flex-col overflow-hidden relative">
                 {prose ? (
                     <ScrollArea className="flex-1">
-                        <div className="max-w-3xl mx-auto w-full p-8 min-h-full relative">
+                        <div ref={contentRef} className="max-w-3xl mx-auto w-full p-8 min-h-full relative">
                             {hasDiff ? (
-                                <div
-                                    className="whitespace-pre-wrap font-serif text-lg leading-relaxed text-foreground"
-                                    onMouseUp={handleDiffSelection}
-                                >
-                                    {diffs.map(([op, text], index) => {
-                                        const isDiff = op !== 0
-                                        const isInsert = op === 1
-                                        return (
-                                            <span
-                                                key={index}
-                                                data-diff-index={index}
-                                                data-diff-op={op}
-                                                onClick={isDiff ? (e) => handleDiffClick(e, index) : undefined}
-                                                className={`
+                                <>
+                                    {diffSelection && (
+                                        <div
+                                            data-diff-action-menu
+                                            className="absolute z-50 animate-in fade-in zoom-in-95 duration-100 bg-popover border border-border rounded-lg shadow-lg p-1.5 flex gap-1"
+                                            style={{ top: diffSelection.y, left: diffSelection.x }}
+                                        >
+                                            <button
+                                                onClick={handlePartialConfirm}
+                                                className="p-1.5 bg-green-500/10 text-green-600 hover:bg-green-500/20 rounded-md transition-colors"
+                                                title="選択した変更を確定 (Confirm)"
+                                            >
+                                                <Check size={16} />
+                                            </button>
+                                            <button
+                                                onClick={handlePartialReject}
+                                                className="p-1.5 bg-destructive/10 text-destructive hover:bg-destructive/20 rounded-md transition-colors"
+                                                title="選択した変更を取り消し (Undo)"
+                                            >
+                                                <X size={16} />
+                                            </button>
+                                        </div>
+                                    )}
+                                    <div
+                                        className="whitespace-pre-wrap font-serif text-lg leading-relaxed text-foreground"
+                                        onMouseUp={handleDiffSelection}
+                                    >
+                                        {diffs.map(([op, text], index) => {
+                                            const isDiff = op !== 0
+                                            const isInsert = op === 1
+                                            return (
+                                                <span
+                                                    key={index}
+                                                    data-diff-index={index}
+                                                    data-diff-op={op}
+                                                    onClick={isDiff ? (e) => handleDiffClick(e, index) : undefined}
+                                                    className={`
                                                     ${isDiff ? 'cursor-pointer px-1 rounded mx-0.5 transition-colors' : ''}
                                                     ${isInsert
-                                                        ? 'bg-green-500/20 text-green-700 dark:text-green-300 hover:bg-green-500/30'
-                                                        : op === -1 ? 'bg-destructive/10 text-destructive line-through opacity-60 hover:bg-destructive/20 hover:opacity-100' : ''
-                                                    }
+                                                            ? 'bg-green-500/20 text-green-700 dark:text-green-300 hover:bg-green-500/30'
+                                                            : op === -1 ? 'bg-destructive/10 text-destructive line-through opacity-60 hover:bg-destructive/20 hover:opacity-100' : ''
+                                                        }
                                                     ${diffSelection?.indices.has(index) ? 'ring-2 ring-primary ring-offset-1' : ''}
                                                 `}
-                                                title={isDiff ? (isInsert ? "クリックして操作: 追加箇所" : "クリックして操作: 削除箇所") : undefined}
-                                            >
-                                                {text}
-                                            </span>
-                                        )
-                                    })}
-                                </div>
+                                                    title={isDiff ? (isInsert ? "クリックして操作: 追加箇所" : "クリックして操作: 削除箇所") : undefined}
+                                                >
+                                                    {text}
+                                                </span>
+                                            )
+                                        })}
+                                    </div>
+                                </>
                             ) : (
                                 <>
                                     {/* Highlight Overlay */}
@@ -572,6 +638,22 @@ export default function EditorPane() {
                                     />
                                 </>
                             )}
+
+                            {/* Selection Menu Popup for Refine */}
+                            {selectionMenu.show && (
+                                <div
+                                    className="absolute z-50 animate-in fade-in zoom-in-95 duration-100"
+                                    style={{ top: selectionMenu.y, left: selectionMenu.x }}
+                                >
+                                    <button
+                                        onClick={focusInputForRefining}
+                                        className="flex items-center gap-2 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-full shadow-lg hover:scale-105 transition-transform"
+                                    >
+                                        <Sparkles size={12} />
+                                        この部分を修正
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </ScrollArea>
                 ) : (
@@ -580,45 +662,6 @@ export default function EditorPane() {
                             <Wand2 size={32} />
                         </div>
                         <p className="text-sm font-medium">構成案を作成して「構成から生成」ボタンを押してください</p>
-                    </div>
-                )}
-
-                {/* Selection Menu Popup for Refine */}
-                {selectionMenu.show && (
-                    <div
-                        className="absolute z-50 animate-in fade-in zoom-in-95 duration-100"
-                        style={{ top: selectionMenu.y, left: selectionMenu.x }}
-                    >
-                        <button
-                            onClick={focusInputForRefining}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-full shadow-lg hover:scale-105 transition-transform"
-                        >
-                            <Sparkles size={12} />
-                            この部分を修正
-                        </button>
-                    </div>
-                )}
-
-                {/* Partial Diff Action Popover */}
-                {diffSelection && (
-                    <div
-                        className="absolute z-50 animate-in fade-in zoom-in-95 duration-100 bg-popover border border-border rounded-lg shadow-lg p-1.5 flex gap-1 transform -translate-y-1/2"
-                        style={{ top: diffSelection.y, left: diffSelection.x }}
-                    >
-                        <button
-                            onClick={handlePartialConfirm}
-                            className="p-1.5 bg-green-500/10 text-green-600 hover:bg-green-500/20 rounded-md transition-colors"
-                            title="選択した変更を確定 (Confirm)"
-                        >
-                            <Check size={16} />
-                        </button>
-                        <button
-                            onClick={handlePartialReject}
-                            className="p-1.5 bg-destructive/10 text-destructive hover:bg-destructive/20 rounded-md transition-colors"
-                            title="選択した変更を取り消し (Undo)"
-                        >
-                            <X size={16} />
-                        </button>
                     </div>
                 )}
             </div>
