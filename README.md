@@ -43,7 +43,7 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 # 依存関係のインストール
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 
 # 環境変数の設定
 # .env.example をコピーして .env を作成し、GEMINI_API_KEY を設定してください
