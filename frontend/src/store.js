@@ -13,6 +13,8 @@ const useStore = create(
             isGeneratingProse: false,
             theme: 'light', // 'light' or 'dark'
             viewMode: 'planning', // 'planning' | 'writing'
+            availableServices: [],   // バックエンドから取得、persist対象外
+            activeServiceId: null,   // persist対象
 
             toggleTheme: () => set((state) => {
                 const newTheme = state.theme === 'light' ? 'dark' : 'light'
@@ -25,6 +27,9 @@ const useStore = create(
             }),
 
             setViewMode: (mode) => set({ viewMode: mode }),
+
+            setAvailableServices: (services) => set({ availableServices: services }),
+            setActiveServiceId: (id) => set({ activeServiceId: id }),
 
             initTheme: () => {
                 const state = get()
@@ -181,6 +186,10 @@ const useStore = create(
         }),
         {
             name: 'aideaedit-storage',
+            partialize: (state) => {
+                const { availableServices, ...rest } = state
+                return rest
+            },
         }
     )
 )

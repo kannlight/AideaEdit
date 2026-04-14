@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import List
 import json
 import re
-from services.deps import llm_service
+from services.deps import get_llm_service
 
 router = APIRouter()
 
@@ -84,7 +84,8 @@ async def update_structure(request: StructureUpdateRequest, req: Request):
     user_prompt = f"現在の構成案:\n{request.current_structure}\n\n{memo_display}\n\nこれらを踏まえた新しい構成案を作成してください。"
 
     async def event_generator():
-        async for chunk in llm_service.generate_stream(system_prompt, user_prompt):
+        llm = get_llm_service()
+        async for chunk in llm.generate_stream(system_prompt, user_prompt):
             if await req.is_disconnected():
                 break
             yield f"data: {json.dumps({'content': chunk})}\n\n"
@@ -97,7 +98,8 @@ async def generate_prose(request: ProseGenerateRequest, req: Request):
     user_prompt = f"フォーマット: {request.format}\n\n構成案:\n{request.structure}\n\nこれに基づき文章を執筆してください。"
 
     async def event_generator():
-        async for chunk in llm_service.generate_stream(PROSE_GENERATE_SYSTEM_PROMPT, user_prompt):
+        llm = get_llm_service()
+        async for chunk in llm.generate_stream(PROSE_GENERATE_SYSTEM_PROMPT, user_prompt):
             if await req.is_disconnected():
                 break
             yield f"data: {json.dumps({'content': chunk})}\n\n"
@@ -126,8 +128,9 @@ async def refine_prose(request: ProseRefineRequest):
     max_retries = 3
     refined_part = None
     
+    llm = get_llm_service()
     for i in range(max_retries):
-        llm_output = await llm_service.generate_sync(PROSE_REFINE_SYSTEM_PROMPT, user_prompt)
+        llm_output = await llm.generate_sync(PROSE_REFINE_SYSTEM_PROMPT, user_prompt)
         
         match = re.search(r'<target>(.*?)</target>', llm_output, re.DOTALL)
         if match:

@@ -4,8 +4,7 @@ import uvicorn
 import os
 from dotenv import load_dotenv
 
-from services.deps import llm_service
-from routes import agent
+from routes import agent, settings
 
 load_dotenv()
 
@@ -20,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(agent.router, prefix="/api", tags=["agent"])
+app.include_router(settings.router, prefix="/api", tags=["settings"])
 
 @app.get("/health")
 async def health_check():

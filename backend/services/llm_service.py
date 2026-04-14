@@ -1,12 +1,16 @@
 import os
 import abc
-from typing import AsyncGenerator, List, Optional
+import json
+import httpx
+from typing import AsyncGenerator
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
+
 class LLMResponse(BaseModel):
     content: str
+
 
 class LLMService(abc.ABC):
     @abc.abstractmethod
@@ -17,13 +21,13 @@ class LLMService(abc.ABC):
     async def generate_sync(self, system_prompt: str, user_prompt: str) -> str:
         pass
 
+
 class GeminiAdapter(LLMService):
     def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash"):
         self.client = genai.Client(api_key=api_key)
         self.model_name = model_name
 
     async def generate_stream(self, system_prompt: str, user_prompt: str) -> AsyncGenerator[str, None]:
-        # ローカルLLM移行を見据え、特定のモデルに依存しないデータ構成
         async for chunk in await self.client.aio.models.generate_content_stream(
             model=self.model_name,
             config=types.GenerateContentConfig(
@@ -44,11 +48,52 @@ class GeminiAdapter(LLMService):
         )
         return response.text
 
-# 将来のOllamaAdapterのスタブ
+
 class OllamaAdapter(LLMService):
+    """Ollama の OpenAI互換エンドポイント（/v1/chat/completions）を使用するアダプター"""
+
+    def __init__(self, base_url: str, model_name: str):
+        self.base_url = base_url.rstrip('/')
+        self.model_name = model_name
+        self._client = httpx.AsyncClient(timeout=120.0)
+
     async def generate_stream(self, system_prompt: str, user_prompt: str) -> AsyncGenerator[str, None]:
-        # TODO: Implement using httpx to Ollama API
-        yield "Ollama implementation pending"
+        url = f"{self.base_url}/v1/chat/completions"
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": True,
+        }
+        async with self._client.stream("POST", url, json=payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:]
+                if data.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                    delta = chunk["choices"][0]["delta"].get("content", "")
+                    if delta:
+                        yield delta
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    continue
 
     async def generate_sync(self, system_prompt: str, user_prompt: str) -> str:
-        return "Ollama implementation pending"
+        url = f"{self.base_url}/v1/chat/completions"
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+        }
+        response = await self._client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]

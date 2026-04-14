@@ -6,12 +6,46 @@ import StructurePane from './components/StructurePane'
 import EditorPane from './components/EditorPane'
 
 function App() {
-    const { memos, structure, prose, resetAll, theme, toggleTheme, initTheme, viewMode, setViewMode } = useStore()
+    const { memos, structure, prose, resetAll, theme, toggleTheme, initTheme, viewMode, setViewMode,
+        availableServices, activeServiceId, setAvailableServices, setActiveServiceId } = useStore()
     const [showResetConfirm, setShowResetConfirm] = useState(false)
 
     useEffect(() => {
         initTheme()
     }, [])
+
+    useEffect(() => {
+        // サービス一覧を取得し、前回選択を復元してバックエンドに同期
+        fetch('/api/settings/services')
+            .then(res => res.json())
+            .then(services => {
+                setAvailableServices(services)
+                if (services.length === 0) return
+
+                // localStorageに保存された選択があり、有効ならそれを使う
+                const savedId = activeServiceId
+                const isValid = services.some(s => s.id === savedId)
+                const targetId = isValid ? savedId : services[0].id
+
+                setActiveServiceId(targetId)
+                fetch('/api/settings/active', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: targetId }),
+                })
+            })
+            .catch(err => console.error('Failed to fetch LLM services:', err))
+    }, [])
+
+    const handleServiceChange = (e) => {
+        const id = e.target.value
+        setActiveServiceId(id)
+        fetch('/api/settings/active', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id }),
+        }).catch(err => console.error('Failed to set active service:', err))
+    }
 
     const handleReset = () => {
         const fullText = `Memos:\n${memos.map(m => `- ${m.content}`).join('\n')}\n\nStructure:\n${structure}\n\nProse:\n${prose}`
@@ -45,6 +79,21 @@ function App() {
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
+                    {availableServices.length > 0 && (
+                        <select
+                            value={activeServiceId ?? ''}
+                            onChange={handleServiceChange}
+                            className="text-xs px-2 py-1.5 rounded-md border border-border bg-background text-foreground hover:bg-accent focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+                            title="使用するLLMサービスを選択"
+                        >
+                            {availableServices.map(s => (
+                                <option key={s.id} value={s.id}>
+                                    {s.name} ({s.model})
+                                </option>
+                            ))}
+                        </select>
+                    )}
+                    <div className="h-4 w-px bg-border mx-1"></div>
                     <button
                         onClick={toggleTheme}
                         className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
