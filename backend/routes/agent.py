@@ -17,16 +17,19 @@ class Memo(BaseModel):
 class StructureUpdateRequest(BaseModel):
     current_structure: str
     new_memo: Memo
+    service_id: str
 
 class ProseGenerateRequest(BaseModel):
     structure: str
     format: str = "Plain"  # Plain, Markdown, LaTeX
+    service_id: str
 
 class ProseRefineRequest(BaseModel):
     full_text: str
     instruction: str
     selected_start: int = 0
     selected_end: int = 0
+    service_id: str
 
 # --- Prompts ---
 
@@ -84,7 +87,7 @@ async def update_structure(request: StructureUpdateRequest, req: Request):
     user_prompt = f"現在の構成案:\n{request.current_structure}\n\n{memo_display}\n\nこれらを踏まえた新しい構成案を作成してください。"
 
     async def event_generator():
-        llm = get_llm_service()
+        llm = get_llm_service(request.service_id)
         async for chunk in llm.generate_stream(system_prompt, user_prompt):
             if await req.is_disconnected():
                 break
@@ -98,7 +101,7 @@ async def generate_prose(request: ProseGenerateRequest, req: Request):
     user_prompt = f"フォーマット: {request.format}\n\n構成案:\n{request.structure}\n\nこれに基づき文章を執筆してください。"
 
     async def event_generator():
-        llm = get_llm_service()
+        llm = get_llm_service(request.service_id)
         async for chunk in llm.generate_stream(PROSE_GENERATE_SYSTEM_PROMPT, user_prompt):
             if await req.is_disconnected():
                 break
@@ -128,7 +131,7 @@ async def refine_prose(request: ProseRefineRequest):
     max_retries = 3
     refined_part = None
     
-    llm = get_llm_service()
+    llm = get_llm_service(request.service_id)
     for i in range(max_retries):
         llm_output = await llm.generate_sync(PROSE_REFINE_SYSTEM_PROMPT, user_prompt)
         

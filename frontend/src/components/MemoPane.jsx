@@ -5,7 +5,7 @@ import { fetchSSE } from '../utils/sse'
 import ScrollArea from './ui/ScrollArea'
 
 export default function MemoPane() {
-    const { memos, addMemo, removeMemo, structure, startStructureGeneration, endStructureGeneration, updateStructureStream } = useStore()
+    const { memos, addMemo, removeMemo, structure, startStructureGeneration, endStructureGeneration, updateStructureStream, activeServiceId } = useStore()
     const [inputValue, setInputValue] = useState('')
 
     const handleAdd = async (type) => {
@@ -22,7 +22,8 @@ export default function MemoPane() {
             method: 'POST',
             body: JSON.stringify({
                 current_structure: structure,
-                new_memo: newMemo
+                new_memo: newMemo,
+                service_id: activeServiceId
             })
         }, (data) => {
             fullStructure += data.content

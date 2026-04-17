@@ -17,7 +17,8 @@ export default function StructurePane() {
         endStructureGeneration,
         updateStructureStream,
         revertStructure,
-        confirmStructure
+        confirmStructure,
+        activeServiceId
     } = useStore()
 
     // Local state for block-based editing
@@ -168,7 +169,8 @@ export default function StructurePane() {
                 method: 'POST',
                 body: JSON.stringify({
                     current_structure: prevStructure,
-                    new_memo: pendingMemo
+                    new_memo: pendingMemo,
+                    service_id: activeServiceId
                 })
             }, (data) => {
                 fullStructure += data.content

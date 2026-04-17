@@ -15,7 +15,7 @@ function App() {
     }, [])
 
     useEffect(() => {
-        // サービス一覧を取得し、前回選択を復元してバックエンドに同期
+        // サービス一覧を取得し、前回選択を復元
         fetch('/api/settings/services')
             .then(res => res.json())
             .then(services => {
@@ -25,26 +25,13 @@ function App() {
                 // localStorageに保存された選択があり、有効ならそれを使う
                 const savedId = activeServiceId
                 const isValid = services.some(s => s.id === savedId)
-                const targetId = isValid ? savedId : services[0].id
-
-                setActiveServiceId(targetId)
-                fetch('/api/settings/active', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: targetId }),
-                })
+                if (!isValid) setActiveServiceId(services[0].id)
             })
             .catch(err => console.error('Failed to fetch LLM services:', err))
     }, [])
 
     const handleServiceChange = (e) => {
-        const id = e.target.value
-        setActiveServiceId(id)
-        fetch('/api/settings/active', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id }),
-        }).catch(err => console.error('Failed to set active service:', err))
+        setActiveServiceId(e.target.value)
     }
 
     const handleReset = () => {

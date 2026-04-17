@@ -19,7 +19,6 @@ class ServiceRegistry:
     def __init__(self):
         self._services: List[ServiceInfo] = []
         self._adapters: dict[str, LLMService] = {}
-        self._active_id: Optional[str] = None
         self._load_from_env()
 
     def _load_from_env(self):
@@ -45,32 +44,19 @@ class ServiceRegistry:
                 self._services.append(info)
                 self._adapters[service_id] = OllamaAdapter(base_url=base_url, model_name=model)
 
-        if self._services:
-            self._active_id = self._services[0].id
-        else:
+        if not self._services:
             print("[ServiceRegistry] Warning: No LLM services configured in .env")
 
     def get_services(self) -> List[ServiceInfo]:
         return self._services
 
-    def get_active_id(self) -> Optional[str]:
-        return self._active_id
-
-    def set_active_id(self, service_id: str) -> bool:
-        if service_id in self._adapters:
-            self._active_id = service_id
-            return True
-        return False
-
-    def get_active_adapter(self) -> Optional[LLMService]:
-        if self._active_id:
-            return self._adapters.get(self._active_id)
-        return None
+    def get_adapter(self, service_id: str) -> Optional[LLMService]:
+        return self._adapters.get(service_id)
 
 
 service_registry = ServiceRegistry()
 
 
-def get_llm_service() -> Optional[LLMService]:
-    """現在アクティブなLLMサービスアダプターを返す"""
-    return service_registry.get_active_adapter()
+def get_llm_service(service_id: str) -> Optional[LLMService]:
+    """指定されたIDのLLMサービスアダプターを返す"""
+    return service_registry.get_adapter(service_id)

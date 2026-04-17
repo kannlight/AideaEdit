@@ -15,7 +15,8 @@ export default function EditorPane() {
         endProseGeneration,
         revertProse,
         confirmProse,
-        updatePrevProse
+        updatePrevProse,
+        activeServiceId
     } = useStore()
     const [format, setFormat] = useState('Plain')
     const [instruction, setInstruction] = useState('')
@@ -60,7 +61,7 @@ export default function EditorPane() {
 
         await fetchSSE('/api/prose/generate', {
             method: 'POST',
-            body: JSON.stringify({ structure, format })
+            body: JSON.stringify({ structure, format, service_id: activeServiceId })
         }, (data) => {
             fullProse += data.content
             updateProse(fullProse, true) // isAuto = true
@@ -98,7 +99,8 @@ export default function EditorPane() {
                     full_text: prose,
                     instruction: instruction,
                     selected_start: selection.start,
-                    selected_end: selection.end
+                    selected_end: selection.end,
+                    service_id: activeServiceId
                 })
             })
             const data = await response.json()
@@ -403,7 +405,7 @@ export default function EditorPane() {
 
             await fetchSSE('/api/prose/generate', {
                 method: 'POST',
-                body: JSON.stringify({ structure: args.structure, format: args.format })
+                body: JSON.stringify({ structure: args.structure, format: args.format, service_id: activeServiceId })
             }, (data) => {
                 fullProse += data.content
                 updateProse(fullProse, true)
@@ -428,7 +430,8 @@ export default function EditorPane() {
                         full_text: args.full_text,
                         instruction: args.instruction,
                         selected_start: args.selected_start,
-                        selected_end: args.selected_end
+                        selected_end: args.selected_end,
+                        service_id: activeServiceId
                     })
                 })
                 const data = await response.json()
