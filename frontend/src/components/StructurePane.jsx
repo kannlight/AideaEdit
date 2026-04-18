@@ -26,7 +26,8 @@ const computeLineDiffs = (prevText, currText) => {
     const lineHash = {}
 
     const linesToChars = (text) => {
-        return (text || '').split('\n').map(line => {
+        if (!text) return ''
+        return text.split('\n').map(line => {
             if (!(line in lineHash)) {
                 lineHash[line] = String.fromCodePoint(lineArray.length)
                 lineArray.push(line)
