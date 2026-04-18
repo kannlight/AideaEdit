@@ -58,19 +58,14 @@ export default function StructurePane() {
         isGeneratingStructure,
     } = useStore()
 
-    const [lines, setLines] = useState([])
+    // lines は structure から常に同期的に派生させる（useEffect による遅延なし）
+    const lines = useMemo(() => structure ? structure.split('\n') : [], [structure])
+
     const [editingIndex, setEditingIndex] = useState(null)
+    const [editingValue, setEditingValue] = useState('')
     const [isDiffMode, setIsDiffMode] = useState(false)
     const inputRefs = useRef({})
     const prevIsGenerating = useRef(false)
-
-    useEffect(() => {
-        if (structure) {
-            setLines(structure.split('\n'))
-        } else {
-            setLines([])
-        }
-    }, [structure])
 
     useEffect(() => {
         if (editingIndex !== null && inputRefs.current[editingIndex]) {
@@ -96,7 +91,6 @@ export default function StructurePane() {
         return computeLineDiffs(prevStructure, structure)
     }, [isDiffMode, prevStructure, structure])
 
-    // diffモードでの描画アイテム: 削除行（非編集）と現在行（編集可能）を混在させる
     const renderedItems = useMemo(() => {
         if (!isDiffMode) return []
         const items = []
@@ -124,10 +118,20 @@ export default function StructurePane() {
         updateStructure(newLines.join('\n'))
     }
 
-    const handleLineChange = (index, value) => {
-        const newLines = [...lines]
-        newLines[index] = value
-        setLines(newLines)
+    const startEditing = (index) => {
+        setEditingIndex(index)
+        setEditingValue(lines[index] ?? '')
+    }
+
+    // 現在の編集をストアに保存しつつ別の行に移動する
+    const commitAndMove = (newLines, newIndex) => {
+        syncToStore(newLines)
+        setEditingIndex(newIndex)
+        setEditingValue(newLines[newIndex] ?? '')
+    }
+
+    const handleLineChange = (value) => {
+        setEditingValue(value)
     }
 
     const handleKeyDown = (e, index) => {
@@ -136,53 +140,61 @@ export default function StructurePane() {
         if (e.key === 'Enter') {
             e.preventDefault()
             const newLines = [...lines]
+            newLines[index] = editingValue
             newLines.splice(index + 1, 0, '')
-            setLines(newLines)
-            setEditingIndex(index + 1)
-            syncToStore(newLines)
+            commitAndMove(newLines, index + 1)
         } else if (e.key === 'Backspace') {
-            if (lines[index] === '' && lines.length > 1) {
+            if (editingValue === '' && lines.length > 1) {
                 e.preventDefault()
                 const newLines = [...lines]
                 newLines.splice(index, 1)
-                setLines(newLines)
-                setEditingIndex(Math.max(0, index - 1))
-                syncToStore(newLines)
+                commitAndMove(newLines, Math.max(0, index - 1))
             } else if (e.target.selectionStart === 0 && e.target.selectionEnd === 0 && index > 0) {
                 e.preventDefault()
                 const newLines = [...lines]
-                newLines[index - 1] = newLines[index - 1] + newLines[index]
+                const mergedLine = newLines[index - 1] + editingValue
+                newLines[index - 1] = mergedLine
                 newLines.splice(index, 1)
-                setLines(newLines)
-                setEditingIndex(index - 1)
                 syncToStore(newLines)
+                setEditingIndex(index - 1)
+                setEditingValue(mergedLine)
             }
         } else if (e.key === 'Tab') {
             e.preventDefault()
+            const newValue = e.shiftKey
+                ? editingValue.replace(/^  /, '')
+                : '  ' + editingValue
+            setEditingValue(newValue)
             const newLines = [...lines]
-            newLines[index] = e.shiftKey
-                ? newLines[index].replace(/^  /, '')
-                : '  ' + newLines[index]
-            setLines(newLines)
+            newLines[index] = newValue
             syncToStore(newLines)
         } else if (e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p')) {
             if (e.key === 'ArrowUp' && (e.metaKey || e.ctrlKey || e.altKey)) return
             if (index > 0) {
                 e.preventDefault()
-                setEditingIndex(index - 1)
+                const newLines = [...lines]
+                newLines[index] = editingValue
+                commitAndMove(newLines, index - 1)
             }
         } else if (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')) {
             if (e.key === 'ArrowDown' && (e.metaKey || e.ctrlKey || e.altKey)) return
             if (index < lines.length - 1) {
                 e.preventDefault()
-                setEditingIndex(index + 1)
+                const newLines = [...lines]
+                newLines[index] = editingValue
+                commitAndMove(newLines, index + 1)
             }
         }
     }
 
     const handleBlur = () => {
-        syncToStore(lines)
+        if (editingIndex !== null) {
+            const newLines = [...lines]
+            newLines[editingIndex] = editingValue
+            syncToStore(newLines)
+        }
         setEditingIndex(null)
+        setEditingValue('')
     }
 
     const handleConfirm = () => {
@@ -218,13 +230,13 @@ export default function StructurePane() {
         <div
             key={index}
             className={`min-h-[1.5em] relative group ${isAdded ? 'bg-green-500/10 rounded' : ''}`}
-            onClick={() => setEditingIndex(index)}
+            onClick={() => startEditing(index)}
         >
             {editingIndex === index ? (
                 <input
                     ref={el => inputRefs.current[index] = el}
-                    value={line}
-                    onChange={(e) => handleLineChange(index, e.target.value)}
+                    value={editingValue}
+                    onChange={(e) => handleLineChange(e.target.value)}
                     onKeyDown={(e) => handleKeyDown(e, index)}
                     onBlur={handleBlur}
                     className={`w-full outline-none font-mono text-sm py-1 px-2 rounded -ml-2 ${isAdded ? 'bg-green-500/20' : 'bg-accent/20'}`}
@@ -308,8 +320,8 @@ export default function StructurePane() {
                                 <div
                                     className="flex flex-col items-center justify-center h-40 text-muted-foreground/50 border-2 border-dashed border-border/50 rounded-lg cursor-pointer hover:bg-accent/5"
                                     onClick={() => {
-                                        setLines(['# New Structure'])
-                                        setEditingIndex(0)
+                                        updateStructure('# New Structure')
+                                        startEditing(0)
                                     }}
                                 >
                                     <p className="text-sm">Click to start editing</p>
