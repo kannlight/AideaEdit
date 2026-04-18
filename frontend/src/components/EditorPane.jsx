@@ -586,7 +586,7 @@ export default function EditorPane() {
                                         </div>
                                     )}
                                     <div
-                                        className="whitespace-pre-wrap font-serif text-lg leading-relaxed text-foreground"
+                                        className="whitespace-pre-wrap font-sans text-lg leading-relaxed text-foreground"
                                         onMouseUp={handleDiffSelection}
                                     >
                                         {diffs.map(([op, text], index) => {
@@ -619,7 +619,7 @@ export default function EditorPane() {
                                     {/* Highlight Overlay */}
                                     {showHighlight && (
                                         <div
-                                            className="absolute inset-0 p-0 pointer-events-none whitespace-pre-wrap text-lg leading-relaxed font-serif text-transparent"
+                                            className="absolute inset-0 p-0 pointer-events-none whitespace-pre-wrap text-lg leading-relaxed font-sans text-transparent"
                                             style={{ top: 32, left: 32, right: 32, bottom: 32 }} // Match padding p-8 (32px)
                                         >
                                             <span>{beforeHighlight}</span>
@@ -635,7 +635,7 @@ export default function EditorPane() {
                                         onSelect={handleSelect}
                                         onMouseUp={handleMouseUp}
                                         onFocus={handleTextAreaFocus}
-                                        className="w-full h-full min-h-[calc(100vh-200px)] p-0 border-none focus:ring-0 resize-none bg-transparent outline-none text-foreground text-lg leading-relaxed font-serif transition-colors relative z-10"
+                                        className="w-full h-full min-h-[calc(100vh-200px)] p-0 border-none focus:ring-0 resize-none bg-transparent outline-none text-foreground text-lg leading-relaxed font-sans transition-colors relative z-10"
                                         spellCheck="false"
                                         placeholder="ここに文章が生成されます..."
                                     />
