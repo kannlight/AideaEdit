@@ -541,54 +541,31 @@ export default function EditorPane() {
                 )}
             </div>
 
-            {/* 差分チャンク編集ポップアップ */}
+            {/* 差分チャンク編集ボックス（右側に常駐） */}
             {editingChunk && (
-                <div
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
-                    onMouseDown={() => setEditingChunk(null)}
-                >
-                    <div
-                        className="bg-popover border border-border rounded-xl shadow-xl w-[520px] max-w-[90vw] max-h-[80vh] flex flex-col"
-                        onMouseDown={(e) => e.stopPropagation()}
-                    >
-                        {/* ポップアップヘッダー */}
-                        <div className="flex justify-between items-center px-5 py-4 border-b border-border shrink-0">
-                            <h3 className="text-sm font-semibold text-foreground">差分を編集</h3>
-                            <button
-                                onClick={() => setEditingChunk(null)}
-                                className="p-1 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
-                            >
-                                <X size={16} />
-                            </button>
-                        </div>
-
-                        <div className="p-5 flex flex-col gap-4 overflow-y-auto">
-                            {/* 変更前（参照） */}
-                            {editingChunk.beforeText && (
-                                <div>
-                                    <p className="text-xs font-medium text-muted-foreground mb-2">変更前</p>
-                                    <div className="text-sm text-destructive line-through bg-destructive/5 border border-destructive/20 rounded-lg p-3 whitespace-pre-wrap leading-relaxed select-none">
-                                        {editingChunk.beforeText}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* 変更後（編集可能） */}
-                            <div>
-                                <p className="text-xs font-medium text-muted-foreground mb-2">変更後</p>
-                                <textarea
-                                    value={editingChunk.editedText}
-                                    onChange={(e) => handleEditingChunkChange(e.target.value)}
-                                    className="w-full text-sm bg-green-500/5 border border-green-500/30 text-foreground rounded-lg p-3 focus:ring-2 focus:ring-green-500/30 outline-none resize-none leading-relaxed min-h-[120px]"
-                                    autoFocus
-                                    spellCheck="false"
-                                />
-                            </div>
-
-                            <p className="text-xs text-muted-foreground">
-                                編集内容は差分表示にリアルタイムで反映されます。ポップアップを閉じても差分は確定されません。
+                <div className="absolute top-[65px] right-4 w-72 z-40 bg-popover border border-border rounded-lg shadow-lg flex flex-col overflow-hidden animate-in fade-in slide-in-from-right-4 duration-200">
+                    <div className="flex justify-between items-center px-3 py-2 border-b border-border shrink-0">
+                        <span className="text-xs text-muted-foreground">差分を編集</span>
+                        <button
+                            onClick={() => setEditingChunk(null)}
+                            className="p-0.5 text-muted-foreground hover:text-foreground rounded transition-colors"
+                        >
+                            <X size={14} />
+                        </button>
+                    </div>
+                    <div className="p-3 flex flex-col gap-2 overflow-y-auto">
+                        {editingChunk.beforeText && (
+                            <p className="text-sm text-destructive line-through leading-relaxed select-none opacity-70 whitespace-pre-wrap">
+                                {editingChunk.beforeText}
                             </p>
-                        </div>
+                        )}
+                        <textarea
+                            value={editingChunk.editedText}
+                            onChange={(e) => handleEditingChunkChange(e.target.value)}
+                            className="w-full text-sm text-foreground bg-transparent outline-none resize-none leading-relaxed min-h-[80px]"
+                            autoFocus
+                            spellCheck="false"
+                        />
                     </div>
                 </div>
             )}
