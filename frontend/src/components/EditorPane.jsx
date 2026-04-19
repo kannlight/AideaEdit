@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import useStore from '../store'
-import { Sparkles, Wand2, Copy, Check, Undo2, RefreshCw, X } from 'lucide-react'
+import { Sparkles, Wand2, Copy, Check, Undo2, RefreshCw, X, Pencil } from 'lucide-react'
 import { useDiff } from '../hooks/useDiff'
 import { fetchSSE } from '../utils/sse'
 import ScrollArea from './ui/ScrollArea'
@@ -18,53 +18,42 @@ export default function EditorPane() {
         updatePrevProse,
         activeServiceId
     } = useStore()
+
     const [format, setFormat] = useState('Plain')
     const [instruction, setInstruction] = useState('')
     const [isGenerating, setIsGenerating] = useState(false)
     const [isRefining, setIsRefining] = useState(false)
     const [copied, setCopied] = useState(false)
+    const [isDiffMode, setIsDiffMode] = useState(false)
 
     const [selection, setSelection] = useState({ start: 0, end: 0 })
     const [selectionMenu, setSelectionMenu] = useState({ show: false, x: 0, y: 0 })
-
-    // Partial Diff Logic
     const [diffSelection, setDiffSelection] = useState(null) // { indices: Set<number>, x, y }
+    const [editingChunk, setEditingChunk] = useState(null)   // { start, end, beforeText, editedText }
 
     const textareaRef = useRef(null)
     const inputRef = useRef(null)
-
     const [showHighlight, setShowHighlight] = useState(false)
-    const highlightRef = useRef(null)
     const contentRef = useRef(null)
-    const lastGenerationRef = useRef(null) // Stores context for retry: { type: 'create' | 'refine', args: {} }
+    const lastGenerationRef = useRef(null)
 
-    const { diffHtml, hasDiff, diffs } = useDiff(prose, prevProse)
+    const { hasDiff, diffs } = useDiff(prose, prevProse)
 
-    // Scroll synchronization is not needed if check Overlay is inside the same scroll container
-    // However, if textarea scrolls independently, we need it. 
-    // In this code, textarea is inside ScrollArea -> div relative. 
-    // If text is long, the div grows? 
-    // ScrollArea usually limits height and scrolls content.
-    // So the 'div' inside ScrollArea scrolls? 
-    // Textarea has h-full. 
-    // Let's assume the div grows and ScrollArea scrolls the div.
-    // In that case, absolute overlay on the div will move with it.
+    // ---- Generation handlers ----
 
     const handleGenerate = async () => {
         if (!structure) return
-
         lastGenerationRef.current = { type: 'create', args: { structure, format } }
-
         setIsGenerating(true)
-        startProseGeneration() // Snapshot current prose
+        setIsDiffMode(true)
+        startProseGeneration()
         let fullProse = ''
-
         await fetchSSE('/api/prose/generate', {
             method: 'POST',
             body: JSON.stringify({ structure, format, service_id: activeServiceId })
         }, (data) => {
             fullProse += data.content
-            updateProse(fullProse, true) // isAuto = true
+            updateProse(fullProse, true)
         }, () => {
             setIsGenerating(false)
             endProseGeneration()
@@ -73,38 +62,32 @@ export default function EditorPane() {
 
     const handleRefine = async () => {
         if (!prose || !instruction) return
-
-        // Ensure we capture parameters relative to the *current* state (which will become prevProse)
         lastGenerationRef.current = {
             type: 'refine',
             args: {
-                full_text: prose, // This will be prevProse after startProseGeneration? No, start snapshots it.
-                // Actually, if we retry, we revert. So 'prose' becomes what it was.
-                // So storing 'prose' here is correct for the initial call.
-                // For retry, we need to re-use this context.
+                full_text: prose,
                 instruction,
                 selected_start: selection.start,
                 selected_end: selection.end
             }
         }
-
         setIsRefining(true)
+        setIsDiffMode(true)
         startProseGeneration()
-
         try {
             const response = await fetch('/api/prose/refine', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     full_text: prose,
-                    instruction: instruction,
+                    instruction,
                     selected_start: selection.start,
                     selected_end: selection.end,
                     service_id: activeServiceId
                 })
             })
             const data = await response.json()
-            updateProse(data.refined_content, true) // isAuto = true
+            updateProse(data.refined_content, true)
             setInstruction('')
             setSelectionMenu({ ...selectionMenu, show: false })
             setShowHighlight(false)
@@ -116,293 +99,16 @@ export default function EditorPane() {
         }
     }
 
-    const getSubstitutionPairs = (indices, currentDiffs) => {
-        const newIndices = new Set(indices)
-
-        // Loop through all selected indices to find pairs
-        indices.forEach(index => {
-            const currentOp = currentDiffs[index][0]
-
-            // If current is Delete (-1), look for next Insert (1)
-            if (currentOp === -1) {
-                const nextDiff = currentDiffs[index + 1]
-                if (nextDiff && nextDiff[0] === 1) {
-                    newIndices.add(index + 1)
-                }
-            }
-
-            // If current is Insert (1), look for prev Delete (-1)
-            if (currentOp === 1) {
-                const prevDiff = currentDiffs[index - 1]
-                if (prevDiff && prevDiff[0] === -1) {
-                    newIndices.add(index - 1)
-                }
-            }
-        })
-
-        return newIndices
-    }
-
-    const getSelectionPosition = (indices) => {
-        if (!contentRef.current || indices.size === 0) return null
-
-        let minTop = Infinity
-        let maxRight = -Infinity
-
-        indices.forEach(index => {
-            const span = contentRef.current.querySelector(`[data-diff-index="${index}"]`)
-            if (span) {
-                const rect = span.getBoundingClientRect()
-                if (rect.top < minTop) minTop = rect.top
-                if (rect.right > maxRight) maxRight = rect.right
-            }
-        })
-
-        if (minTop === Infinity) return null
-
-        const containerRect = contentRef.current.getBoundingClientRect()
-
-        return {
-            x: maxRight - containerRect.left + 5,
-            y: minTop - containerRect.top
-        }
-    }
-
-    const handleDiffClick = (e, index) => {
-        e.stopPropagation()
-        // Determine position relative to the scrollable container (parent of spans' wrapper)
-        // Spans are in the div with handleDiffSelection. Its parent is the .relative container (p-8).
-        const container = e.currentTarget.closest('.relative')
-        if (!container) return
-
-        // Check for substitution pairs
-        const initialIndices = new Set([index])
-        const expandedIndices = getSubstitutionPairs(initialIndices, diffs)
-
-        const pos = getSelectionPosition(expandedIndices)
-        if (pos) {
-            setDiffSelection({
-                indices: expandedIndices,
-                x: pos.x,
-                y: pos.y
-            })
-        }
-    }
-
-    const handleDiffSelection = (e) => {
-        const selection = window.getSelection()
-        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return
-
-        const range = selection.getRangeAt(0)
-        const pane = e.currentTarget.closest('.pane')
-        if (!pane) return
-
-        const diffSpans = pane.querySelectorAll('[data-diff-index]')
-        const selectedIndices = new Set()
-
-        // Find all diff spans that intersect with the selection
-        diffSpans.forEach(span => {
-            if (selection.containsNode(span, true)) {
-                // Check if it's actually a diff (indices are on all spans, even equal ones?)
-                // Our implementation adds data-diff-index to ONLY diff spans (colorized ones) or all?
-                // Logic below renders all with data-diff-index.
-                // We only care about diffs (op !== 0).
-                const op = parseInt(span.getAttribute('data-diff-op'))
-                if (op !== 0) {
-                    selectedIndices.add(parseInt(span.getAttribute('data-diff-index')))
-                }
-            }
-        })
-
-        if (selectedIndices.size > 0) {
-            // Expand selection to include substitution pairs
-            const expandedIndices = getSubstitutionPairs(selectedIndices, diffs)
-
-            const pos = getSelectionPosition(expandedIndices)
-
-            if (pos) {
-                setDiffSelection({
-                    indices: expandedIndices,
-                    x: pos.x,
-                    y: pos.y
-                })
-            }
-
-            // Clear browser selection slightly to avoid UI clutter? 
-            // Or keep it to show what is selected? Better keep it.
-        } else {
-            // If clicked but no diffs selected (e.g. only normal text selected), do nothing or clear?
-            // Existing click handler handles click.
-            // This is for range selection.
-        }
-    }
-
-    const handlePartialConfirm = () => {
-        if (!diffSelection) return
-
-        let newPrevProse = ''
-        diffs.forEach((d, i) => {
-            const [op, text] = d
-
-            // If this chunk is in the selection...
-            if (diffSelection.indices.has(i)) {
-                if (op === 1) { // Confirm Insertion: Add to prevProse
-                    newPrevProse += text
-                }
-                // If op === -1: Confirm Deletion: Skip adding to prevProse
-            } else {
-                // Not selected. Keep history (prevProse) structure.
-                // But wait. 'prevProse' structure depends on whether the chunk WAS in it.
-                // If op === 0: In prevProse. Add.
-                // If op === 1: Inserted. Not in prevProse. Skip.
-                // If op === -1: Deleted. Was in prevProse. Add.
-
-                if (op === 0 || op === -1) {
-                    newPrevProse += text
-                }
-            }
-        })
-
-        updatePrevProse(newPrevProse)
-        setDiffSelection(null)
-        window.getSelection()?.removeAllRanges() // Clear selection
-    }
-
-    const handlePartialReject = () => {
-        if (!diffSelection) return
-
-        let newProse = ''
-        diffs.forEach((d, i) => {
-            const [op, text] = d
-
-            if (diffSelection.indices.has(i)) {
-                if (op === -1) { // Reject Deletion: Add back to prose
-                    newProse += text
-                }
-                // If op === 1: Reject Insertion: Skip adding to prose
-            } else {
-                // Not selected. Keep current prose structure.
-                if (op === 0 || op === 1) {
-                    newProse += text
-                }
-            }
-        })
-
-        updateProse(newProse, true)
-        setDiffSelection(null)
-        window.getSelection()?.removeAllRanges() // Clear selection
-    }
-
-    useEffect(() => {
-        if (!diffSelection) return
-
-        const handleClickOutside = (e) => {
-            // Ignore clicks inside the popover or on diff spans
-            if (e.target.closest('[data-diff-action-menu]') || e.target.closest('[data-diff-index]')) return
-            setDiffSelection(null)
-        }
-
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [diffSelection])
-
-    // Determine the content parts for the overlay
-    const beforeHighlight = prose ? prose.substring(0, selection.start) : ''
-    const highlightedText = prose ? prose.substring(selection.start, selection.end) : ''
-    const afterHighlight = prose ? prose.substring(selection.end) : ''
-
-    const handleSelect = (e) => {
-        const start = e.target.selectionStart
-        const end = e.target.selectionEnd
-        setSelection({ start, end })
-
-        // If user manually selects, we accept that as the new selection
-        // If they are just clicking around, highlight should probably clear if it was showing?
-        // Current requirement: "highlight until instruction sent or cursor moves"
-        // If cursor moves (selection changes), we might want to keep highlight IF it's the SAME selection?
-        // But usually cursor move means new selection/caret.
-        // So we should probably clear showHighlight if the user interacts with the textarea.
-        // HOWEVER, handleSelect is called simply when selection changes. 
-        // If we want to persist the highlight WHILE typing in the input, we must NOT clear it here.
-        // But we DO want to clear it if the user clicks back into the textarea and moves the cursor.
-        // We can use onMouseDown or onFocus on the textarea to clear it?
-
-        if (start !== end) {
-            // Logic for menu position...
-        } else {
-            setSelectionMenu({ ...selectionMenu, show: false })
-            // If selection is cleared (cursor click), also clear highlight
-            setShowHighlight(false)
-        }
-    }
-
-    // マウス操作での選択終了を検知してメニュー位置を決定
-    const handleMouseUp = (e) => {
-        const start = textareaRef.current.selectionStart
-        const end = textareaRef.current.selectionEnd
-
-        if (start !== end) {
-            // マウスカーソルの位置に表示
-            const containerRect = contentRef.current.getBoundingClientRect()
-
-            setSelectionMenu({
-                show: true,
-                x: e.clientX - containerRect.left,
-                y: e.clientY - containerRect.top + 10 // 少し下にずらす
-            })
-        } else {
-            setSelectionMenu({ ...selectionMenu, show: false })
-        }
-    }
-
-    const focusInputForRefining = () => {
-        if (inputRef.current) {
-            inputRef.current.focus()
-            setShowHighlight(true) // Enable custom highlight
-        }
-    }
-
-    const handleTextAreaFocus = () => {
-        // If user focuses back on textarea, clear the custom highlight so native selection takes over (or valid cursor movement)
-        setShowHighlight(false)
-    }
-
-    const handleCopy = () => {
-        navigator.clipboard.writeText(prose)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-    }
-
-    const handleUndo = () => {
-        revertProse()
-    }
-
-    const handleConfirm = () => {
-        confirmProse()
-    }
-
     const handleRetry = async () => {
         if (!lastGenerationRef.current) return
-
-        handleUndo() // Revert first to restore original state
-
-        // Wait for state update? In React batching, state updates might not be immediate for read, 
-        // but since we dispatch the fetch in the same event loop (or async), we need to be careful.
-        // Actually, 'revertProse' updates store. 'prose' variable in this scope is stale.
-        // We should use the args stored in ref.
-
+        // revertProse のみ呼ぶ（isDiffMode は維持したまま再生成）
+        revertProse()
+        setEditingChunk(null)
         const { type, args } = lastGenerationRef.current
-
         if (type === 'create') {
-            // Re-run create
-            // We need to re-trigger handleGenerate logic but bypass the 'if (!structure)' check if structure is in args
-            // But handleGenerate uses state 'structure'. 
-            // args.structure should be correct.
-
             setIsGenerating(true)
-            startProseGeneration() // Snapshot (effectively prev=prev)
+            startProseGeneration()
             let fullProse = ''
-
             await fetchSSE('/api/prose/generate', {
                 method: 'POST',
                 body: JSON.stringify({ structure: args.structure, format: args.format, service_id: activeServiceId })
@@ -413,16 +119,10 @@ export default function EditorPane() {
                 setIsGenerating(false)
                 endProseGeneration()
             })
-
         } else if (type === 'refine') {
             setIsRefining(true)
             startProseGeneration()
-
             try {
-                // For refine, args.full_text was the text BEFORE the *last* refinement.
-                // Since we reverted, 'prose' in store is now that text.
-                // We use args.full_text to be safe.
-
                 const response = await fetch('/api/prose/refine', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -436,7 +136,6 @@ export default function EditorPane() {
                 })
                 const data = await response.json()
                 updateProse(data.refined_content, true)
-                // Note: instruction is already cleared in UI, but we don't need to restore it to input
             } catch (err) {
                 console.error('Retry Refine failed', err)
             } finally {
@@ -446,53 +145,218 @@ export default function EditorPane() {
         }
     }
 
-    // Actually I can't update store without tool call.
-    // I will use a trick: 
-    // If I want to update prevProse, I can calculate the new prevProse AND new structure? No.
-    // I MUST ADD updatePrevProse to store. 
+    const handleUndo = () => {
+        revertProse()
+        setIsDiffMode(false)
+        setEditingChunk(null)
+        setDiffSelection(null)
+    }
 
-    // RE-PLAN: I will add 'updatePrevProse' to store.js in the next step or right now if possible?
-    // I can't do two files in one step properly if functionality depends on it.
-    // But wait, the previous plan didn't explicitly say "add updatePrevProse". 
-    // It said "handlePartialConfirm updating prevProse".
+    const handleConfirm = () => {
+        confirmProse()
+        setIsDiffMode(false)
+        setEditingChunk(null)
+        setDiffSelection(null)
+    }
 
-    // Let's implement the logic assuming the function exists, then I will add it to store.js.
-    // Or I can pause and add it to store.js now.
+    // ---- Partial diff logic ----
 
-    // Let's do store.js modification in a separate turn? 
-    // No, I can do multi_replace on store.js too? 
-    // Yes, I can do multiple calls.
+    const getSubstitutionPairs = (indices, currentDiffs) => {
+        const newIndices = new Set(indices)
+        indices.forEach(index => {
+            const currentOp = currentDiffs[index][0]
+            if (currentOp === -1) {
+                const nextDiff = currentDiffs[index + 1]
+                if (nextDiff && nextDiff[0] === 1) newIndices.add(index + 1)
+            }
+            if (currentOp === 1) {
+                const prevDiff = currentDiffs[index - 1]
+                if (prevDiff && prevDiff[0] === -1) newIndices.add(index - 1)
+            }
+        })
+        return newIndices
+    }
 
-    // Wait, let's look at handlePartialReject.
-    // Reject Insertion: Remove from 'prose'.
-    // Reject Deletion: Add back to 'prose'.
-    // behavior: updateProse(newProse, isAuto=true).
-    // usage of isAuto=true keeps prevProse AS IS.
-    // So 'prose' changes, 'prevProse' stays same. This effectively "Undo"s the diff.
-    // Logic:
-    // Insert (1) -> Reject -> Remove from prose. prevProse didn't have it. Result: Equal.
-    // Delete (-1) -> Reject -> Add to prose. prevProse had it. Result: Equal.
+    const getSelectionPosition = (indices) => {
+        if (!contentRef.current || indices.size === 0) return null
+        let minTop = Infinity
+        let maxRight = -Infinity
+        indices.forEach(index => {
+            const span = contentRef.current.querySelector(`[data-diff-index="${index}"]`)
+            if (span) {
+                const rect = span.getBoundingClientRect()
+                if (rect.top < minTop) minTop = rect.top
+                if (rect.right > maxRight) maxRight = rect.right
+            }
+        })
+        if (minTop === Infinity) return null
+        const containerRect = contentRef.current.getBoundingClientRect()
+        return { x: maxRight - containerRect.left + 5, y: minTop - containerRect.top }
+    }
 
-    // So Rejecting CAN be done with existing `updateProse`.
+    const handleDiffClick = (e, index) => {
+        e.stopPropagation()
+        const initialIndices = new Set([index])
+        const expandedIndices = getSubstitutionPairs(initialIndices, diffs)
+        const pos = getSelectionPosition(expandedIndices)
+        if (pos) setDiffSelection({ indices: expandedIndices, x: pos.x, y: pos.y })
+    }
 
-    // Confirming REQUIRES updating `prevProse`.
-    // Existing actions: `confirmProse` (all), `updateProse` (all or prose only).
-    // `revertProse` (prose = prev).
+    const handleDiffSelection = (e) => {
+        const sel = window.getSelection()
+        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return
+        const pane = e.currentTarget.closest('.pane')
+        if (!pane) return
+        const diffSpans = pane.querySelectorAll('[data-diff-index]')
+        const selectedIndices = new Set()
+        diffSpans.forEach(span => {
+            if (sel.containsNode(span, true)) {
+                const op = parseInt(span.getAttribute('data-diff-op'))
+                if (op !== 0) selectedIndices.add(parseInt(span.getAttribute('data-diff-index')))
+            }
+        })
+        if (selectedIndices.size > 0) {
+            const expandedIndices = getSubstitutionPairs(selectedIndices, diffs)
+            const pos = getSelectionPosition(expandedIndices)
+            if (pos) setDiffSelection({ indices: expandedIndices, x: pos.x, y: pos.y })
+        }
+    }
 
-    // I DO NOT have a way to update `prevProse` arbitrarily.
-    // I must add `updatePrevProse` to store.js.
+    const handlePartialConfirm = () => {
+        if (!diffSelection) return
+        let newPrevProse = ''
+        diffs.forEach((d, i) => {
+            const [op, text] = d
+            if (diffSelection.indices.has(i)) {
+                if (op === 1) newPrevProse += text
+            } else {
+                if (op === 0 || op === -1) newPrevProse += text
+            }
+        })
+        updatePrevProse(newPrevProse)
+        setDiffSelection(null)
+        window.getSelection()?.removeAllRanges()
+    }
 
-    // I will invoke the store update tool first in this turn? No, I am already committed to this tool call.
-    // I will write the code here assuming `updatePrevProse` is passed from store.
-    // And I will add it to `useStore` destructuring.
-    // And I will update store.js in the next step.
+    const handlePartialReject = () => {
+        if (!diffSelection) return
+        let newProse = ''
+        diffs.forEach((d, i) => {
+            const [op, text] = d
+            if (diffSelection.indices.has(i)) {
+                if (op === -1) newProse += text
+            } else {
+                if (op === 0 || op === 1) newProse += text
+            }
+        })
+        updateProse(newProse, true)
+        setDiffSelection(null)
+        window.getSelection()?.removeAllRanges()
+    }
 
-    // Wait, let's keep it clean.
-    // I'll render the UI first.
+    // ---- Chunk editing ----
 
+    // diffSelection内のop=1チャンクのproseオフセットを計算してポップアップを開く
+    const handleEditChunk = () => {
+        if (!diffSelection) return
+        let proseOffset = 0
+        let insertStart = null
+        let insertEnd = null
+        let beforeText = ''
+        let editedText = ''
+        diffs.forEach(([op, text], i) => {
+            if (diffSelection.indices.has(i)) {
+                if (op === -1) {
+                    beforeText += text
+                } else if (op === 1) {
+                    if (insertStart === null) insertStart = proseOffset
+                    editedText += text
+                    insertEnd = proseOffset + text.length
+                }
+            }
+            if (op !== -1) proseOffset += text.length
+        })
+        if (insertStart === null) return  // op=1 がなければ開かない
+        setEditingChunk({ start: insertStart, end: insertEnd, beforeText, editedText })
+        setDiffSelection(null)
+    }
+
+    const handleEditingChunkChange = (newText) => {
+        const { start, end } = editingChunk
+        const newProse = prose.slice(0, start) + newText + prose.slice(end)
+        updateProse(newProse, true)
+        setEditingChunk(prev => ({ ...prev, editedText: newText, end: start + newText.length }))
+    }
+
+    // Editボタンを表示するか：選択中にop=1が含まれる場合のみ
+    const selectionHasInsert = diffSelection &&
+        [...diffSelection.indices].some(i => diffs[i]?.[0] === 1)
+
+    // ---- Click outside handlers ----
+
+    useEffect(() => {
+        if (!diffSelection) return
+        const handleClickOutside = (e) => {
+            if (e.target.closest('[data-diff-action-menu]') || e.target.closest('[data-diff-index]')) return
+            setDiffSelection(null)
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [diffSelection])
+
+    // ---- Text selection / highlight ----
+
+    const beforeHighlight = prose ? prose.substring(0, selection.start) : ''
+    const highlightedText = prose ? prose.substring(selection.start, selection.end) : ''
+    const afterHighlight = prose ? prose.substring(selection.end) : ''
+
+    const handleSelect = (e) => {
+        const start = e.target.selectionStart
+        const end = e.target.selectionEnd
+        setSelection({ start, end })
+        if (start === end) {
+            setSelectionMenu({ ...selectionMenu, show: false })
+            setShowHighlight(false)
+        }
+    }
+
+    const handleMouseUp = (e) => {
+        const start = textareaRef.current.selectionStart
+        const end = textareaRef.current.selectionEnd
+        if (start !== end) {
+            const containerRect = contentRef.current.getBoundingClientRect()
+            setSelectionMenu({
+                show: true,
+                x: e.clientX - containerRect.left,
+                y: e.clientY - containerRect.top + 10
+            })
+        } else {
+            setSelectionMenu({ ...selectionMenu, show: false })
+        }
+    }
+
+    const focusInputForRefining = () => {
+        if (inputRef.current) {
+            inputRef.current.focus()
+            setShowHighlight(true)
+        }
+    }
+
+    const handleTextAreaFocus = () => {
+        setShowHighlight(false)
+    }
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(prose)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+    }
+
+    // ---- Render ----
 
     return (
         <div className="pane bg-background flex flex-col h-full relative">
+            {/* Header */}
             <div className="px-6 py-3 border-b border-border bg-background/95 backdrop-blur sticky top-0 z-10 shrink-0 flex justify-between items-center h-[57px]">
                 <div className="flex items-center gap-4">
                     <h2 className="font-semibold text-foreground text-sm tracking-tight flex items-center gap-2">Final Prose</h2>
@@ -508,20 +372,19 @@ export default function EditorPane() {
                     </select>
                 </div>
                 <div className="flex gap-2 items-center">
-                    {/* Diff Actions */}
-                    {hasDiff && (
+                    {isDiffMode && (
                         <div className="flex gap-1 items-center animate-in fade-in slide-in-from-right-4 duration-300 mr-2">
                             <button
                                 onClick={handleRetry}
                                 className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
-                                title="再生成 (Reload)"
+                                title="再生成"
                             >
                                 <RefreshCw size={16} />
                             </button>
                             <button
                                 onClick={handleUndo}
                                 className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-md transition-colors"
-                                title="取り消し (Undo)"
+                                title="取り消し"
                             >
                                 <Undo2 size={16} />
                             </button>
@@ -529,13 +392,12 @@ export default function EditorPane() {
                             <button
                                 onClick={handleConfirm}
                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-medium rounded-md hover:opacity-90 transition-opacity shadow-sm"
-                                title="確定 (Confirm)"
+                                title="確定"
                             >
                                 <Check size={14} /> 確定
                             </button>
                         </div>
                     )}
-
                     <button
                         onClick={handleCopy}
                         disabled={!prose}
@@ -544,7 +406,7 @@ export default function EditorPane() {
                     >
                         {copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
                     </button>
-                    {!hasDiff && (
+                    {!isDiffMode && (
                         <button
                             onClick={handleGenerate}
                             disabled={!structure || isGenerating}
@@ -557,12 +419,14 @@ export default function EditorPane() {
                 </div>
             </div>
 
+            {/* Main content */}
             <div className="flex-1 flex flex-col overflow-hidden relative">
                 {prose ? (
                     <ScrollArea className="flex-1">
                         <div ref={contentRef} className="max-w-3xl mx-auto w-full p-8 min-h-full relative">
                             {hasDiff ? (
                                 <>
+                                    {/* 部分操作ポップオーバー */}
                                     {diffSelection && (
                                         <div
                                             data-diff-action-menu
@@ -572,19 +436,29 @@ export default function EditorPane() {
                                             <button
                                                 onClick={handlePartialConfirm}
                                                 className="p-1.5 bg-green-500/10 text-green-600 hover:bg-green-500/20 rounded-md transition-colors"
-                                                title="選択した変更を確定 (Confirm)"
+                                                title="選択した変更を確定"
                                             >
                                                 <Check size={16} />
                                             </button>
                                             <button
                                                 onClick={handlePartialReject}
                                                 className="p-1.5 bg-destructive/10 text-destructive hover:bg-destructive/20 rounded-md transition-colors"
-                                                title="選択した変更を取り消し (Undo)"
+                                                title="選択した変更を取り消し"
                                             >
                                                 <X size={16} />
                                             </button>
+                                            {selectionHasInsert && (
+                                                <button
+                                                    onClick={handleEditChunk}
+                                                    className="p-1.5 bg-accent text-foreground hover:bg-accent/80 rounded-md transition-colors"
+                                                    title="この差分を編集"
+                                                >
+                                                    <Pencil size={16} />
+                                                </button>
+                                            )}
                                         </div>
                                     )}
+                                    {/* 差分スパン表示 */}
                                     <div
                                         className="whitespace-pre-wrap font-sans text-lg leading-relaxed text-foreground"
                                         onMouseUp={handleDiffSelection}
@@ -599,14 +473,14 @@ export default function EditorPane() {
                                                     data-diff-op={op}
                                                     onClick={isDiff ? (e) => handleDiffClick(e, index) : undefined}
                                                     className={`
-                                                    ${isDiff ? 'cursor-pointer px-1 rounded mx-0.5 transition-colors' : ''}
-                                                    ${isInsert
+                                                        ${isDiff ? 'cursor-pointer px-1 rounded mx-0.5 transition-colors' : ''}
+                                                        ${isInsert
                                                             ? 'bg-green-500/20 text-green-700 dark:text-green-300 hover:bg-green-500/30'
                                                             : op === -1 ? 'bg-destructive/10 text-destructive line-through opacity-60 hover:bg-destructive/20 hover:opacity-100' : ''
                                                         }
-                                                    ${diffSelection?.indices.has(index) ? 'ring-2 ring-primary ring-offset-1' : ''}
-                                                `}
-                                                    title={isDiff ? (isInsert ? "クリックして操作: 追加箇所" : "クリックして操作: 削除箇所") : undefined}
+                                                        ${diffSelection?.indices.has(index) ? 'ring-2 ring-primary ring-offset-1' : ''}
+                                                    `}
+                                                    title={isDiff ? (isInsert ? '追加箇所' : '削除箇所') : undefined}
                                                 >
                                                     {text}
                                                 </span>
@@ -616,22 +490,20 @@ export default function EditorPane() {
                                 </>
                             ) : (
                                 <>
-                                    {/* Highlight Overlay */}
                                     {showHighlight && (
                                         <div
                                             className="absolute inset-0 p-0 pointer-events-none whitespace-pre-wrap text-lg leading-relaxed font-sans text-transparent"
-                                            style={{ top: 32, left: 32, right: 32, bottom: 32 }} // Match padding p-8 (32px)
+                                            style={{ top: 32, left: 32, right: 32, bottom: 32 }}
                                         >
                                             <span>{beforeHighlight}</span>
                                             <span className="bg-primary/20">{highlightedText}</span>
                                             <span>{afterHighlight}</span>
                                         </div>
                                     )}
-
                                     <textarea
                                         ref={textareaRef}
                                         value={prose}
-                                        onChange={(e) => updateProse(e.target.value)} // Manual edit -> isAuto = false (default)
+                                        onChange={(e) => updateProse(e.target.value)}
                                         onSelect={handleSelect}
                                         onMouseUp={handleMouseUp}
                                         onFocus={handleTextAreaFocus}
@@ -642,7 +514,7 @@ export default function EditorPane() {
                                 </>
                             )}
 
-                            {/* Selection Menu Popup for Refine */}
+                            {/* テキスト選択後の修正メニュー */}
                             {selectionMenu.show && (
                                 <div
                                     className="absolute z-50 animate-in fade-in zoom-in-95 duration-100"
@@ -669,6 +541,59 @@ export default function EditorPane() {
                 )}
             </div>
 
+            {/* 差分チャンク編集ポップアップ */}
+            {editingChunk && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+                    onMouseDown={() => setEditingChunk(null)}
+                >
+                    <div
+                        className="bg-popover border border-border rounded-xl shadow-xl w-[520px] max-w-[90vw] max-h-[80vh] flex flex-col"
+                        onMouseDown={(e) => e.stopPropagation()}
+                    >
+                        {/* ポップアップヘッダー */}
+                        <div className="flex justify-between items-center px-5 py-4 border-b border-border shrink-0">
+                            <h3 className="text-sm font-semibold text-foreground">差分を編集</h3>
+                            <button
+                                onClick={() => setEditingChunk(null)}
+                                className="p-1 text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        <div className="p-5 flex flex-col gap-4 overflow-y-auto">
+                            {/* 変更前（参照） */}
+                            {editingChunk.beforeText && (
+                                <div>
+                                    <p className="text-xs font-medium text-muted-foreground mb-2">変更前</p>
+                                    <div className="text-sm text-destructive line-through bg-destructive/5 border border-destructive/20 rounded-lg p-3 whitespace-pre-wrap leading-relaxed select-none">
+                                        {editingChunk.beforeText}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 変更後（編集可能） */}
+                            <div>
+                                <p className="text-xs font-medium text-muted-foreground mb-2">変更後</p>
+                                <textarea
+                                    value={editingChunk.editedText}
+                                    onChange={(e) => handleEditingChunkChange(e.target.value)}
+                                    className="w-full text-sm bg-green-500/5 border border-green-500/30 text-foreground rounded-lg p-3 focus:ring-2 focus:ring-green-500/30 outline-none resize-none leading-relaxed min-h-[120px]"
+                                    autoFocus
+                                    spellCheck="false"
+                                />
+                            </div>
+
+                            <p className="text-xs text-muted-foreground">
+                                編集内容は差分表示にリアルタイムで反映されます。ポップアップを閉じても差分は確定されません。
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 下部：修正指示入力 */}
             <div className="p-4 border-t border-border bg-background/95 backdrop-blur z-20">
                 <div className="max-w-3xl mx-auto flex gap-2 relative">
                     <div className="relative flex-1">
@@ -678,14 +603,12 @@ export default function EditorPane() {
                             value={instruction}
                             onChange={(e) => setInstruction(e.target.value)}
                             onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                                    handleRefine()
-                                }
+                                if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleRefine()
                             }}
                             placeholder="AIに修正を依頼する (範囲選択をすれば修正箇所を指定可能です)"
                             className="w-full pl-4 pr-12 py-2.5 text-sm bg-muted/40 text-foreground border border-input rounded-full focus:bg-background focus:ring-2 focus:ring-ring focus:border-input outline-none transition-all shadow-sm"
                         />
-                        <div className="absolute right-1.5 top-1.5 ">
+                        <div className="absolute right-1.5 top-1.5">
                             <button
                                 onClick={handleRefine}
                                 disabled={!prose || !instruction || isRefining}
