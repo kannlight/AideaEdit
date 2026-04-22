@@ -26,14 +26,16 @@ AideaEditは以下のステップで文章執筆作業をサポートします�
 
 ### Backend
 -   [FastAPI](https://fastapi.tiangolo.com/) (Python)
--   [Google GenAI SDK](https://ai.google.dev/) (Gemini 2.5 Flash)
+-   [Google GenAI SDK](https://ai.google.dev/) (Gemini 2.5 Flash) または Ollama (OpenAI互換エンドポイント経由)
 
 ## セットアップ手順
 
 ### 前提条件
 -   Node.js (v18以上推奨)
 -   Python (v3.10以上推奨)
--   Google AI Studio API Key
+-   以下のいずれか（または両方）:
+    -   Google AI Studio API Key（Gemini利用時）
+    -   [Ollama](https://ollama.com/) がインストール済みで、使用するモデルがダウンロード済みであること
 
 ### 1. バックエンドの起動
 
@@ -46,11 +48,42 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r backend/requirements.txt
 
 # 環境変数の設定
-# .env.example をコピーして .env を作成し、GEMINI_API_KEY を設定してください
 cp .env.example .env
+
+# .env を編集して、使用するLLMサービスを設定してください（後述）
 
 # サーバー起動 (http://localhost:8000)
 python backend/main.py
+```
+
+#### LLMサービスの設定
+
+`.env` ファイルを開き、利用するサービスに合わせて設定します。GeminiとOllamaは同時に有効化でき、UIから切り替えて使用できます。
+
+**Gemini を使う場合**
+
+```env
+GEMINI_API_KEY=your_api_key_here
+GEMINI_MODEL=gemini-2.5-flash  # 省略時のデフォルト
+```
+
+**Ollama を使う場合**
+
+`OLLAMA_SERVICES` に `表示名|ベースURL|モデル名` の形式で記載します。カンマ区切りで複数のサービスを登録できます。
+
+```env
+# ローカルのOllamaを1つ使う場合
+OLLAMA_SERVICES=Ollama Local|http://localhost:11434|qwen3:8b
+
+# 複数のOllamaサーバーを登録する場合
+OLLAMA_SERVICES=GPU-A|http://gpu-a:11434|qwen3:8b,GPU-B|http://gpu-b:11435|llama3.1:8b
+```
+
+Ollamaのデフォルトポートは `11434` です。使用するモデルが事前にダウンロードされていることを確認してください。
+
+```bash
+# モデルのダウンロード例
+ollama pull qwen3:8b
 ```
 
 ### 2. フロントエンドの起動
