@@ -15,6 +15,10 @@ AideaEditは以下のステップで文章執筆作業をサポートします�
 -   **リアルタイム構成提案**: メモを追加するたびに、AIが構成案を更新・洗練させます。
 -   **文章生成**: 固まった構成案を元に、AIが本文（Markdown/Text/LaTeX）を生成します。
 
+## デモ動画
+
+https://drive.google.com/file/d/1Ww-0LzX6VavtCUTNAFj1NaAyrlGxNfQY/view?usp=sharing
+
 ## 技術スタック
 
 ### Frontend
